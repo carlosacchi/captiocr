@@ -8,6 +8,7 @@ from datetime import datetime
 import threading
 import time
 import ctypes
+import difflib
 
 print("Starting application...")
 
@@ -157,11 +158,11 @@ class ScreenOCR:
             # OK button
             ok_button = tk.Button(self.selection_window, text="OK", command=self.start_ocr)
             ok_button.pack(side=tk.TOP, pady=10)
-
-            # STOP button
+            
+            # Stop button
             stop_button = tk.Button(self.selection_window, text="STOP", command=self.stop_capture)
             stop_button.pack(side=tk.TOP, pady=10)
-            
+
             # Center window
             x = (self.screen_width - self.current_width) 
             y = (self.screen_height - self.current_height) 
@@ -213,6 +214,10 @@ class ScreenOCR:
             
         except Exception as e:
             print(f"Error ending drag: {str(e)}")
+            
+    def text_similarity(self, text1, text2):
+        """Calculate similarity ratio between two texts"""
+        return difflib.SequenceMatcher(None, text1, text2).ratio()
 
     def capture_screen(self):
         try:
@@ -236,7 +241,8 @@ class ScreenOCR:
                     screenshot = ImageGrab.grab(bbox=(x, y, x+width, y+height))
                     text = pytesseract.image_to_string(screenshot, lang=self.get_lang_code()).strip()
                     
-                    if text and text != last_text:
+                    # Only save if text is significantly different (less than 90% similar)
+                    if text and self.text_similarity(text, last_text) < 0.9:
                         with open(output_file, 'a', encoding='utf-8') as f:
                             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
                         last_text = text
@@ -247,7 +253,7 @@ class ScreenOCR:
                         self.stop_capture()
                         break
                         
-                    time.sleep(1)
+                    time.sleep(2)  # Increased to 2 seconds
                         
                 except Exception as e:
                     print(f"Error during capture iteration: {str(e)}")
