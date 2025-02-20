@@ -1,6 +1,6 @@
-# 🖥️ LiveCaption OCR - Real-Time Screen Text Extraction
+# 🖥️ CaptiOCR - Real-Time Screen Text Extraction
 
-**LiveCaption OCR** is an open-source **real-time screen text extraction tool** that allows users to capture on-screen text dynamically using **Tesseract OCR**. With an easy-to-use interface, you can **select an area of the screen** and extract text **continuously**, making it ideal for live captions, subtitles, or instant text recognition.
+**CaptiOCR** is an open-source **real-time screen text extraction tool** that allows users to capture on-screen text dynamically using **Tesseract OCR**. With an easy-to-use interface, you can **select an area of the screen** and extract text **continuously**, making it ideal for live captions, subtitles, or instant text recognition.
 
 🚀 **Planned future enhancements** include:
 - ✅ **On-demand language installation** for Tesseract OCR
@@ -50,9 +50,9 @@ TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 After installing the dependencies, clone the repository and run the script:
 ```bash
-git clone https://github.com/your-username/LiveCaptionOCR.git
-cd LiveCaptionOCR
-python Live-Caption-OCR-Reader.py
+git clone https://github.com/CarloSacchi/CaptiOCR.git
+cd CaptiOCR
+python CaptiOCR.py
 ```
 
 ---

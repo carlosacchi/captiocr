@@ -22,9 +22,9 @@ pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 class ScreenOCR:
     def __init__(self):
-        print("Initializing ScreenOCR...")
+        print("Initializing CaptiOCR...")
         self.root = tk.Tk()
-        self.root.title("Screen OCR Tool")
+        self.root.title("CaptiOCR Tool")
         
         # Get system DPI scaling
         try:
@@ -78,7 +78,7 @@ class ScreenOCR:
         
         print("Adding title...")
         # Title
-        title = ttk.Label(frame, text="Screen OCR Tool", font=("Arial", 20))
+        title = ttk.Label(frame, text="CaptiOCR Tool", font=("Arial", 20))
         title.grid(row=0, column=0, pady=20)
         
         print("Adding language selection...")
