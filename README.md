@@ -31,7 +31,7 @@ Before installing, ensure you have the following:
 
 ### **1️⃣ Install Python & Dependencies**
 ```bash
-pip install pytesseract pillow keyboard pyautogui tkinter
+pip install pytesseract pillow keyboard pyautogui tkinter pytesseract
 ```
 
 ### **2️⃣ Install Tesseract OCR**

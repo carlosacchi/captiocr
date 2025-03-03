@@ -4,11 +4,14 @@ import pytesseract
 from PIL import ImageGrab
 import keyboard
 import os
+import sys
+import re
 from datetime import datetime
 import threading
 import time
 import ctypes
 import difflib
+import pathlib
 
 print("Starting application...")
 
@@ -25,6 +28,12 @@ class ScreenOCR:
         print("Initializing CaptiOCR...")
         self.root = tk.Tk()
         self.root.title("CaptiOCR Tool")
+        
+        # Create the output directory
+        self.setup_output_directory()
+        
+        # Track the most recently processed file
+        self.last_processed_file = None
         
         # Get system DPI scaling
         try:
@@ -49,16 +58,17 @@ class ScreenOCR:
         # Basic screen info
         self.screen_width = self.root.winfo_screenwidth()
         self.screen_height = self.root.winfo_screenheight()
-        self.monitor_offset_x = 0
-        self.monitor_offset_y = 0
         
         print("Setting window size...")
         # Set initial size
-        window_width = 350
+        window_width = 300
         window_height = 550
         x = (self.screen_width - window_width) // 2
         y = (self.screen_height - window_height) // 2
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
+
+        self.root.minsize(window_width, window_height)
+        self.root.maxsize(window_width, window_height)
         
         print("Setting languages...")
         # Language list
@@ -70,6 +80,28 @@ class ScreenOCR:
         print("Setting up UI...")
         self.setup_ui()
         print("Initialization complete.")
+    
+    def setup_output_directory(self):
+        """Create 'captures' directory in the same folder as the script"""
+        try:
+            # Get the path of the script
+            if getattr(sys, 'frozen', False):
+                # For compiled executables
+                script_path = os.path.dirname(sys.executable)
+            else:
+                # For .py script
+                script_path = os.path.dirname(os.path.abspath(__file__))
+            
+            # Create captures directory
+            self.capture_dir = os.path.join(script_path, "captures")
+            os.makedirs(self.capture_dir, exist_ok=True)
+            print(f"Output directory set to: {self.capture_dir}")
+            self.log_debug(f"Output directory created at: {self.capture_dir}")
+        except Exception as e:
+            print(f"Error creating output directory: {str(e)}")
+            # Fallback to current directory
+            self.capture_dir = "captures"
+            os.makedirs(self.capture_dir, exist_ok=True)
         
     def setup_ui(self):
         print("Creating main frame...")
@@ -78,7 +110,7 @@ class ScreenOCR:
         
         print("Adding title...")
         # Title
-        title = ttk.Label(frame, text="CaptiOCR Tool", font=("Arial", 20))
+        title = ttk.Label(frame, text="CaptiOCR Exp Tool", font=("Arial", 20))
         title.grid(row=0, column=0, pady=20)
         
         print("Adding language selection...")
@@ -106,6 +138,11 @@ class ScreenOCR:
         self.status_label = ttk.Label(frame, textvariable=self.status_var)
         self.status_label.grid(row=4, column=0, pady=10)
         
+        print("Adding caption display area...")
+        # Caption display area
+        caption_frame = ttk.LabelFrame(frame, text="Captured Text", padding="10")
+        caption_frame.grid(row=5, column=0, pady=5, sticky=(tk.W, tk.E))
+        
         print("Adding instructions...")
         # Instructions
         instructions = """
@@ -113,7 +150,7 @@ class ScreenOCR:
         1. Select language
         2. Click 'Start' and position the yellow area
         3. Press OK to begin OCR
-        4. Press Ctrl+Q to stop and exit
+        4. Press Ctrl+Q or STOP to stop OCR
         """
         ttk.Label(frame, text=instructions, justify=tk.LEFT).grid(row=5, column=0, pady=20)
         
@@ -124,7 +161,8 @@ class ScreenOCR:
     def log_debug(self, message):
         if self.debug_enabled.get():
             timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            with open("ocr_debug.log", "a", encoding='utf-8') as f:
+            log_path = os.path.join(self.capture_dir, "ocr_debug.log")
+            with open(log_path, "a", encoding='utf-8') as f:
                 f.write(f"{timestamp}: {message}\n")
 
     def get_lang_code(self):
@@ -134,21 +172,19 @@ class ScreenOCR:
     def create_selection_window(self):
         try:
             self.selection_window = tk.Toplevel(self.root)
-            self.selection_window.attributes('-alpha', 0.3)
+            self.selection_window.attributes('-alpha', 0.2)
             self.selection_window.attributes('-topmost', True)
             self.selection_window.configure(bg='yellow')
             
             self.selection_window.overrideredirect(True)
-            
+        
             # Initialize coordinates
             self.start_x = None
             self.start_y = None
-            self.current_x = None
-            self.current_y = None
             
             # Set size
-            self.current_width = 500
-            self.current_height = 150
+            self.current_width = 550
+            self.current_height = 160
             
             # Mouse bindings
             self.selection_window.bind('<Button-1>', self.start_drag)
@@ -163,13 +199,10 @@ class ScreenOCR:
             stop_button = tk.Button(self.selection_window, text="STOP", command=self.stop_capture)
             stop_button.pack(side=tk.TOP, pady=10)
 
-            # Center window
-            x = (self.screen_width - self.current_width) 
-            y = (self.screen_height - self.current_height) 
+            # Center window properly
+            x = (self.screen_width - self.current_width) // 2
+            y = (self.screen_height - self.current_height) // 2
             self.selection_window.geometry(f"{self.current_width}x{self.current_height}+{x}+{y}")
-            
-            self.current_x = x
-            self.current_y = y
             
             self.log_debug(f"Selection window created at x={x}, y={y}")
             
@@ -184,16 +217,12 @@ class ScreenOCR:
     def do_drag(self, event):
         try:
             if self.start_x is not None and self.start_y is not None:
-                real_x = event.x_root - self.monitor_offset_x
-                real_y = event.y_root - self.monitor_offset_y
-                
-                new_x = real_x - self.start_x
-                new_y = real_y - self.start_y
+                # Calculate new position directly
+                new_x = event.x_root - self.start_x
+                new_y = event.y_root - self.start_y
                 
                 print(f"During drag - Mouse: ({event.x_root}, {event.y_root}), Window: ({new_x}, {new_y})")
                 self.selection_window.geometry(f"+{new_x}+{new_y}")
-                self.current_x = real_x
-                self.current_y = real_y
                 
         except Exception as e:
             print(f"Error during drag: {str(e)}")
@@ -203,14 +232,15 @@ class ScreenOCR:
             raw_x = self.selection_window.winfo_rootx()
             raw_y = self.selection_window.winfo_rooty()
             
-            self.current_x = int(raw_x * self.scale_factor)
-            self.current_y = int(raw_y * self.scale_factor)
+            # Log the position values
+            scaled_x = int(raw_x * self.scale_factor)
+            scaled_y = int(raw_y * self.scale_factor)
             
             print(f"=== Drag End ===")
             print(f"System scaling factor: {self.scale_factor}")
             print(f"Mouse position: ({event.x_root}, {event.y_root})")
             print(f"Raw window position: ({raw_x}, {raw_y})")
-            print(f"Scaled position: ({self.current_x}, {self.current_y})")
+            print(f"Scaled position: ({scaled_x}, {scaled_y})")
             
         except Exception as e:
             print(f"Error ending drag: {str(e)}")
@@ -218,6 +248,51 @@ class ScreenOCR:
     def text_similarity(self, text1, text2):
         """Calculate similarity ratio between two texts"""
         return difflib.SequenceMatcher(None, text1, text2).ratio()
+        
+    def extract_sentences(self, text):
+        """Split text into sentences for better comparison"""
+        if not text:
+            return []
+        # Split by common sentence terminators
+        sentences = []
+        for part in re.split(r'[.!?]+', text):
+            part = part.strip()
+            if part:
+                sentences.append(part)
+        return sentences
+        
+    def has_significant_new_content(self, new_text, previous_text, threshold=0.95):
+        """
+        Check if new text has enough unique content compared to previous text
+        using sentence-level comparison instead of whole text comparison
+        """
+        if not previous_text:
+            return True
+            
+        # Extract sentences from both texts
+        new_sentences = self.extract_sentences(new_text)
+        prev_sentences = self.extract_sentences(previous_text)
+        
+        if not new_sentences:
+            return False
+            
+        # Count how many new sentences are not in the previous text
+        new_sentence_count = 0
+        for new_sentence in new_sentences:
+            is_new = True
+            for prev_sentence in prev_sentences:
+                # If the sentence is very similar to a previous one, it's not new
+                if len(new_sentence) > 5 and len(prev_sentence) > 5:
+                    similarity = self.text_similarity(new_sentence, prev_sentence)
+                    if similarity > threshold:
+                        is_new = False
+                        break
+            
+            if is_new:
+                new_sentence_count += 1
+                
+        # If at least 25% of sentences are new, consider it significant new content
+        return new_sentence_count >= max(1, len(new_sentences) * 0.25)
 
     def capture_screen(self):
         try:
@@ -225,14 +300,20 @@ class ScreenOCR:
             self.status_var.set("Capturing... (Press Ctrl+Q to stop)")
             
             last_text = ""
-            output_file = f"capture_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt"
+            # Create output file in the capture directory
+            filename = f"capture_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt"
+            output_file = os.path.join(self.capture_dir, filename)
             
             with open(output_file, 'w', encoding='utf-8') as f:
                 f.write(f"Caption capture started: {datetime.now()}\n\n")
             
+            # Track consecutive similar captures to adapt the capture interval
+            similar_captures_count = 0
+            capture_interval = 3  # Start with 3 seconds interval
+            
             while self.running:
                 try:
-                    # Use scaled coordinates for capture
+                    # Use window functions to get coordinates directly
                     x = int(self.selection_window.winfo_rootx() * self.scale_factor)
                     y = int(self.selection_window.winfo_rooty() * self.scale_factor)
                     width = int(self.selection_window.winfo_width() * self.scale_factor)
@@ -241,22 +322,43 @@ class ScreenOCR:
                     screenshot = ImageGrab.grab(bbox=(x, y, x+width, y+height))
                     text = pytesseract.image_to_string(screenshot, lang=self.get_lang_code()).strip()
                     
-                    # Only save if text is significantly different (less than 90% similar)
-                    if text and self.text_similarity(text, last_text) < 0.9:
+                    # Filter out common OCR noise markers
+                    text = re.sub(r'\b(ox|ox\s*\||s10|570°|STOP)\b', '', text)
+                    text = re.sub(r'\s{2,}', ' ', text).strip()  # Remove multiple spaces
+                    
+                    # Check if the text has significant new content compared to the last saved text
+                    if text and self.has_significant_new_content(text, last_text):
                         with open(output_file, 'a', encoding='utf-8') as f:
                             f.write(f"[{datetime.now().strftime('%H:%M:%S')}] {text}\n")
                         last_text = text
                         self.status_var.set(f"Last capture: {text[:50]}...")
+                        similar_captures_count = 0
+                        
+                        # If we captured new content, we can reset the interval back to normal
+                        if capture_interval > 3:
+                            capture_interval = 3
+                    else:
+                        # If no significant new content, increment counter and potentially adjust interval
+                        similar_captures_count += 1
+                        if similar_captures_count > 3:
+                            # If we've had multiple similar captures, increase the interval 
+                            # to reduce the chance of capturing duplicate content
+                            capture_interval = min(capture_interval + 1, 5)  # Max 5 seconds
                     
                     if keyboard.is_pressed('ctrl+q'):
                         print("Ctrl+Q pressed, stopping capture")
                         self.stop_capture()
                         break
-                        
-                    time.sleep(2)  # Increased to 2 seconds
+                    
+                    # Log the current capture status and interval
+                    self.log_debug(f"Capture interval: {capture_interval}s, Similar captures: {similar_captures_count}")
+                    
+                    # Dynamic sleep time based on the capture interval
+                    time.sleep(capture_interval)
                         
                 except Exception as e:
                     print(f"Error during capture iteration: {str(e)}")
+                    self.log_debug(f"Capture error: {str(e)}")
                     time.sleep(1)
                     
         except Exception as e:
@@ -288,12 +390,40 @@ class ScreenOCR:
         try:
             print("Stopping capture")
             self.running = False
+            latest_file = self.find_latest_capture_file()
+            if latest_file and (self.last_processed_file != latest_file):
+                self.post_process_capture_file(latest_file)
+                self.last_processed_file = latest_file
+                self.status_var.set(f"Capture stopped and processed")
+            else:
+                self.status_var.set("Capture stopped (no new file to process)")
+                
             if self.selection_window:
                 self.selection_window.destroy()
                 self.selection_window = None
             self.start_button.state(['!disabled'])
         except Exception as e:
             print(f"Error in stop_capture: {str(e)}")
+            self.log_debug(f"Error stopping capture: {str(e)}")
+            
+    def on_closing(self):
+        try:
+            print("Closing application")
+            self.stop_capture()
+            
+            # Skip post-processing since it's already done in stop_capture
+            # We just need to check if there's a new file that wasn't processed yet
+            latest_file = self.find_latest_capture_file()
+            if latest_file and (self.last_processed_file != latest_file):
+                print(f"Processing final capture file: {latest_file}")
+                self.post_process_capture_file(latest_file)
+            else:
+                print("No new files to process on exit")
+                
+            self.root.destroy()
+            print(f"Files saved in: {self.capture_dir}")
+        except Exception as e:
+            print(f"Error in on_closing: {str(e)}")
 
     def run(self):
         try:
@@ -307,9 +437,87 @@ class ScreenOCR:
         try:
             print("Closing application")
             self.stop_capture()
+            
+            # Final post-processing on the most recent capture file
+            latest_file = self.find_latest_capture_file()
+            if latest_file:
+                self.post_process_capture_file(latest_file)
+                
             self.root.destroy()
+            print(f"Files saved in: {self.capture_dir}")
         except Exception as e:
             print(f"Error in on_closing: {str(e)}")
+            
+    def find_latest_capture_file(self):
+        """Find the most recent capture file in the capture directory, ignoring processed files"""
+        try:
+            # Only consider original capture files (not already processed ones)
+            files = [f for f in os.listdir(self.capture_dir) 
+                    if f.startswith("capture_") 
+                    and f.endswith(".txt")
+                    and not "_processed" in f]  # Skip already processed files
+                    
+            if not files:
+                return None
+                
+            files.sort(reverse=True)  # Latest file first
+            return os.path.join(self.capture_dir, files[0])
+        except Exception as e:
+            print(f"Error finding latest file: {str(e)}")
+            return None
+            
+    def post_process_capture_file(self, filepath):
+        """Remove remaining duplications from the capture file"""
+        try:
+            print(f"Post-processing capture file: {filepath}")
+            
+            with open(filepath, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                
+            # Extract timestamp blocks
+            blocks = []
+            current_block = []
+            timestamp_pattern = re.compile(r'^\[\d{2}:\d{2}:\d{2}\]')
+            
+            for line in lines:
+                if timestamp_pattern.match(line):
+                    if current_block:
+                        blocks.append(current_block)
+                    current_block = [line]
+                elif current_block:
+                    current_block.append(line)
+                    
+            if current_block:
+                blocks.append(current_block)
+                
+            # Filter out blocks with duplicate content
+            unique_blocks = [blocks[0]]  # Keep the first block
+            
+            for i in range(1, len(blocks)):
+                current_text = ''.join(blocks[i])
+                is_unique = True
+                
+                # Compare with previous blocks
+                for prev_block in unique_blocks[-3:]:  # Check against last 3 unique blocks
+                    prev_text = ''.join(prev_block)
+                    # If similarity is too high, skip this block
+                    if self.text_similarity(current_text, prev_text) > 0.75:
+                        is_unique = False
+                        break
+                        
+                if is_unique:
+                    unique_blocks.append(blocks[i])
+                    
+            # Write back the filtered content
+            processed_filepath = filepath.replace('.txt', '_processed.txt')
+            with open(processed_filepath, 'w', encoding='utf-8') as f:
+                f.write(''.join([''.join(block) for block in unique_blocks]))
+                
+            print(f"Original blocks: {len(blocks)}, After processing: {len(unique_blocks)}")
+            print(f"Processed file saved as: {processed_filepath}")
+            
+        except Exception as e:
+            print(f"Error in post-processing: {str(e)}")
 
 if __name__ == "__main__":
     try:
