@@ -15,7 +15,7 @@ import pathlib
 
 print("Starting application...")
 
-# Tesseract Configuration
+# Tesseract Configuration Windows OS
 TESSDATA_PREFIX = r'C:\Program Files\Tesseract-OCR\tessdata'
 TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
