@@ -1,0 +1,155 @@
+# Operating System
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE e editor
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.code-workspace
+*.log
+
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.pnp
+.pnp.js
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.venv/
+.envrc
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Java
+*.class
+*.jar
+*.war
+*.ear
+*.iml
+/.gradle
+/.mvn
+/target/
+/build/
+/.idea/
+
+# Dotnet
+bin/
+obj/
+*.pdb
+*.user
+*.vs
+/.nuget/
+/.packages/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.backup
+.terraform.lock.hcl
+
+# Docker
+*.env
+docker-compose.override.yml
+*.dockerignore
+.docker/
+
+# Log e temp
+*.log
+*.out
+*.tmp
+*.swp
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Backup e dump
+dump.rdb
+dump.sql
+*.bak
+*.tar.gz
+*.zip
+*.7z
+*.gz
+*.tgz
+*.bz2
+*.xz
+
+# Sensitive Configurations
+.env
+.env.local
+.env.*.local
+!.env.example
+*.pem
+*.crt
+*.key
+
+# Other tools
+dist/
+coverage/
+.nyc_output/
+.cypress/
+/.pytest_cache/
+/.tox/
+/.vagrant/
+/.parcel-cache/
+/.eslintcache/
+/.prettier_cache/
+/.expo/
+/.firebase/
+
+# Git
+.git/
+*.orig
+*.rej
+
+# Database
+*.sqlite3
+*.db
+*.mdb
+*.sql
+*.psql
+*.mysql
+*.pg_dump
+
+# CI/CD
+/.github/workflows/*
+/.circleci/*
+/.travis.yml
+/.gitlab-ci.yml
+/jenkinsfile
+
+# Kubernetes
+*.kube/config
+kustomization.yaml
+
+# Android
+*.apk
+*.aab
+.gradle
+/captures/
+/output.json
+
+# iOS/macOS
+Pods/
+*.xcworkspace
+*.xcodeproj
+*.xcuserdata
+DerivedData/
+
+# Custom
+custom_exclude_folder/
+legacy_temp/
+notes_and_drafts/
