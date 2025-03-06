@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 import pytesseract
 from PIL import ImageGrab
 import keyboard
@@ -15,7 +15,7 @@ import pathlib
 
 print("Starting application...")
 
-# Tesseract Configuration Windows OS
+# Tesseract Configuration
 TESSDATA_PREFIX = r'C:\Program Files\Tesseract-OCR\tessdata'
 TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
@@ -34,6 +34,7 @@ class ScreenOCR:
         
         # Track the most recently processed file
         self.last_processed_file = None
+        self.current_capture_timestamp = None
         
         # Get system DPI scaling
         try:
@@ -301,7 +302,9 @@ class ScreenOCR:
             
             last_text = ""
             # Create output file in the capture directory
-            filename = f"capture_{datetime.now().strftime('%Y-%m-%d-%H-%M-%S')}.txt"
+            timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            self.current_capture_timestamp = timestamp
+            filename = f"capture_{timestamp}.txt"
             output_file = os.path.join(self.capture_dir, filename)
             
             with open(output_file, 'w', encoding='utf-8') as f:
@@ -386,15 +389,38 @@ class ScreenOCR:
             print(f"Error in start_ocr: {str(e)}")
             messagebox.showerror("Error", f"Failed to start OCR: {str(e)}")
 
+    def prompt_for_filename(self):
+        """Ask user for a name to include in the processed filename"""
+        try:
+            filename = simpledialog.askstring("Save As", "Enter a name for the captured file:",
+                                              parent=self.root)
+            if filename:
+                # Remove spaces and special characters
+                filename = re.sub(r'[^\w\-]', '_', filename)
+                return filename
+            return None
+        except Exception as e:
+            print(f"Error prompting for filename: {str(e)}")
+            return None
+
     def stop_capture(self):
         try:
             print("Stopping capture")
             self.running = False
+            
             latest_file = self.find_latest_capture_file()
             if latest_file and (self.last_processed_file != latest_file):
-                self.post_process_capture_file(latest_file)
+                # Ask user for a name
+                custom_name = self.prompt_for_filename()
+                
+                # Process the file regardless if there's a custom name or not
+                self.post_process_capture_file(latest_file, custom_name)
                 self.last_processed_file = latest_file
-                self.status_var.set(f"Capture stopped and processed")
+                
+                if custom_name:
+                    self.status_var.set(f"Capture stopped and saved with name: {custom_name}")
+                else:
+                    self.status_var.set("Capture stopped and processed with default name")
             else:
                 self.status_var.set("Capture stopped (no new file to process)")
                 
@@ -411,15 +437,6 @@ class ScreenOCR:
             print("Closing application")
             self.stop_capture()
             
-            # Skip post-processing since it's already done in stop_capture
-            # We just need to check if there's a new file that wasn't processed yet
-            latest_file = self.find_latest_capture_file()
-            if latest_file and (self.last_processed_file != latest_file):
-                print(f"Processing final capture file: {latest_file}")
-                self.post_process_capture_file(latest_file)
-            else:
-                print("No new files to process on exit")
-                
             self.root.destroy()
             print(f"Files saved in: {self.capture_dir}")
         except Exception as e:
@@ -432,30 +449,16 @@ class ScreenOCR:
             self.root.mainloop()
         except Exception as e:
             print(f"Error in run: {str(e)}")
-    
-    def on_closing(self):
-        try:
-            print("Closing application")
-            self.stop_capture()
-            
-            # Final post-processing on the most recent capture file
-            latest_file = self.find_latest_capture_file()
-            if latest_file:
-                self.post_process_capture_file(latest_file)
-                
-            self.root.destroy()
-            print(f"Files saved in: {self.capture_dir}")
-        except Exception as e:
-            print(f"Error in on_closing: {str(e)}")
             
     def find_latest_capture_file(self):
         """Find the most recent capture file in the capture directory, ignoring processed files"""
         try:
             # Only consider original capture files (not already processed ones)
             files = [f for f in os.listdir(self.capture_dir) 
-                    if f.startswith("capture_") 
-                    and f.endswith(".txt")
-                    and not "_processed" in f]  # Skip already processed files
+                if f.startswith("capture_") 
+                and f.endswith(".txt")
+                and not "_processed" in f  # Skip already processed files
+                and re.match(r'^capture_\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.txt$', f)]  # Match timestamp format
                     
             if not files:
                 return None
@@ -466,8 +469,8 @@ class ScreenOCR:
             print(f"Error finding latest file: {str(e)}")
             return None
             
-    def post_process_capture_file(self, filepath):
-        """Remove remaining duplications from the capture file"""
+    def post_process_capture_file(self, filepath, custom_name=None):
+        """Remove remaining duplications from the capture file and save with custom name if provided"""
         try:
             print(f"Post-processing capture file: {filepath}")
             
@@ -507,9 +510,30 @@ class ScreenOCR:
                         
                 if is_unique:
                     unique_blocks.append(blocks[i])
-                    
+            
+            # Use the timestamp from the original capture for the processed file
+            timestamp = self.current_capture_timestamp
+            if not timestamp:
+                # Fallback: Extract timestamp from the filename
+                base_filename = os.path.basename(filepath)
+                timestamp_match = re.match(r'^capture_(\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2})\.txt$', base_filename)
+                if timestamp_match:
+                    timestamp = timestamp_match.group(1)
+                else:
+                    # If all else fails, use current timestamp
+                    timestamp = datetime.now().strftime('%Y-%m-%d-%H-%M-%S')
+            
+            # Create the processed filename with the required format
+            if custom_name:
+                # Se l'utente ha fornito un nome, usalo all'inizio
+                processed_filename = f"{custom_name}_capture_{timestamp}_processed.txt"
+            else:
+                # Se l'utente ha premuto "Cancel" o ha lasciato il campo vuoto, usa il formato predefinito
+                processed_filename = f"capture_{timestamp}_processed.txt"
+                
+            processed_filepath = os.path.join(self.capture_dir, processed_filename)
+            
             # Write back the filtered content
-            processed_filepath = filepath.replace('.txt', '_processed.txt')
             with open(processed_filepath, 'w', encoding='utf-8') as f:
                 f.write(''.join([''.join(block) for block in unique_blocks]))
                 
