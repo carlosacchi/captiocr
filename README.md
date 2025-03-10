@@ -6,15 +6,18 @@
 - ✅ **On-demand language installation** for Tesseract OCR
 - ✅ **Dynamically resizable selection area** instead of a fixed rectangle
 - ✅ **Improved multi-monitor support**
-- ✅ **Live text and Trasnlation overlay feature**
+- ✅ **Live text and Translation overlay feature**
 
 ---
 
 ## 📌 Features
 ✔ **Real-time OCR processing** using [Tesseract OCR](https://github.com/tesseract-ocr/tesseract)  
 ✔ **Multi-language support** (English, Italian, more in the future)  
-✔ **Logs and saves extracted text** to a file
+✔ **Logs and saves extracted text** to a file  
 ✔ **Hotkey Support:** `Ctrl+Q` to stop capture  
+✔ **Named profile saving** for different capture configurations  
+✔ **Optimized capture area selection** for reduced text duplication  
+✔ **Debug logging** for troubleshooting  
 
 ---
 
@@ -59,33 +62,87 @@ python CaptiOCR.py
 
 ## 🖥️ How to Use
 
-1️⃣ **Select a language** from the dropdown menu (Ita or Eng).  
-2️⃣ **Click "Start (Select Area)"** to open the selection window.  
-3️⃣ **Drag the yellow rectangle** over the area you want to capture.  
-4️⃣ **Press OK** to start real-time OCR.  
-5️⃣ **Press `Ctrl+Q`or `STOP`** to stop the capture.
+1️⃣ **Select a language** from the dropdown menu (Italian or English).
+2️⃣ **Click "Start (Select Area)"** to open the selection window.
 
-![LiveOCR Start Capturing](images/LiveOCR-Start-Capturing.jpeg)
+![LiveOCR Start Capturing](images/LiveOCR-Open-CaptiOCR.jpeg)
 
-![LiveOCR Main Screen](images/LiveOCR-MainSCreen.jpeg)
+3️⃣ **Drag and Drop** over the area you want to capture.
 
-📂 **Captured text is saved in a file named** in the same folder as the Python file, `capture_YYYY-MM-DD-HH-MM-SS.txt`.
+![LiveOCR Start Capturing](images/LiveOCR-DragandDrop.jpeg)
 
-![LiveOCR Text Files](images/LiveOCR-txt-files.jpeg)
+![LiveOCR Start Capturing](images/LiveOCR-Selected-Area.jpeg)
 
-![LiveOCR Text Output](images/LiveOCR-Text-Output.jpeg)
+4️⃣ **Press ENTER** to start real-time OCR.
+
+![LiveOCR Start Capturing](images/LiveOCR-Running.jpeg)
+
+5️⃣ **Press `Ctrl+Q`or `STOP`** to stop the capture.  
+
+6️⃣ **Name your capture** when prompted after stopping.
+
+![LiveOCR Start Capturing](images/LiveOCR-SaveFile.jpeg)
+
+**Repeat** for your next meeting.
+
+📂 **Captured text is saved in a file named** in the "captures" folder, `capture_YYYY-MM-DD-HH-MM-SS.txt`.
+
+![LiveOCR Text Files](images/LiveOCR-Output-File.jpeg)
+
+![LiveOCR Text Files](images/LiveOCR-Processed-File.jpeg)
 
 ---
 
-## 📊 Future Development
+## 🔍 Tips & Tricks
 
-This project is **open-source and under active development**. Planned features include:
-- 📉 **Dynamic area selection (resizable & movable)**
-- 📉 **On-demand installation of additional OCR languages**
+### Optimizing OCR Accuracy
+
+- **Choose the correct language**: While OCR may sometimes work with the wrong language selected, choosing the correct language model significantly improves accuracy, especially with text containing special characters, accents, and language-specific patterns.
+
+- **Optimize capture area**: For better results and fewer duplications, select a narrow rectangular area that focuses precisely on the caption/subtitle area. An aspect ratio that is wider than it is tall usually works best for captions.
+
+- **Minimum area size**: Both width and height must be at least 50 pixels for OCR to function properly.
+
+- **Saved profiles**: Save your optimized capture areas for different programs (Teams, Zoom, etc.) using the "Save Settings" feature.
+
+### Advanced Features
+
+- **Moving the capture area**: Click and drag the capture window to reposition it during a capture session.
+
+- **Debug logging**: Enable the "Debug Logging" checkbox to record detailed operation information for troubleshooting.
+
+- **Custom naming**: When stopping a capture, you can assign a custom name to the output file for better organization.
+
+---
+
+## 📊 Roadmap
+
+This project is **open-source and under active development**. Upcoming improvements include:
+
+### Architecture and Code Improvements
+- 📉 **Modularized code structure** for better maintainability
+- 📉 **Improved logging framework** with proper log levels
+- 📉 **Better error handling and recovery**
+- 📉 **Enhanced thread management** for improved stability
+
+### UI and Usability Enhancements
+- 📉 **Enhanced interface** with results panel and preview
+- 📉 **Dynamic area selection** (resizable & movable during capture)
+- 📉 **Dark mode and theme options**
 - 📉 **Better multi-monitor support**
-- 📉 **Live translator with DeepL or Google Translate API**
-- 📉 **I improvement**
-- 📉 **Cloud integration for storage**
+
+### Functional Enhancements
+- 📉 **Expanded language options** with auto-detection capability
+- 📉 **Image preprocessing options** for better OCR results
+- 📉 **Multiple capture areas** simultaneously
+- 📉 **Live translator** with DeepL or Google Translate API
+- 📉 **Various export formats** (PDF, HTML, Word)
+- 📉 **Direct clipboard integration**
+
+### Performance Optimization
+- 📉 **Optimized memory usage** during image processing
+- 📉 **Parallel OCR processing** for faster results
+- 📉 **Cloud integration** for storage and processing
 
 If you want to contribute, feel free to submit **pull requests or feature requests**! 🚀
 
@@ -95,5 +152,4 @@ If you want to contribute, feel free to submit **pull requests or feature reques
 
 This project is licensed under the **MIT License**, allowing free use and modification.
 
-👤 **Author:** Carlo Sacchi  
-
+👤 **Author:** Carlo Sacchi
