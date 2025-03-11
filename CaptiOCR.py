@@ -16,18 +16,25 @@ from collections import deque
 import json
 import logging
 
-print("Starting application...")
+# Add this at the very top of your file, right after imports
+original_print = print  # Store the original print function
 
 # Tesseract Configuration
 TESSDATA_PREFIX = r'C:\Program Files\Tesseract-OCR\tessdata'
 TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-print("Setting Tesseract paths...")
+# Update on every published Version
+VERSION = "v0.5.0-alpha 11/03/2025"
+
 os.environ['TESSDATA_PREFIX'] = TESSDATA_PREFIX
 pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
 
 class ScreenOCR:
     def __init__(self):
+        print("Starting application...")
+        
+        print("Setting Tesseract paths...")
+        
         print("Initializing CaptiOCR...")
         self.root = tk.Tk()
         self.root.title("CaptiOCR Tool")
@@ -45,6 +52,7 @@ class ScreenOCR:
         self.stop_event = threading.Event()
         self.thread_lock = threading.Lock()
         self.text_history = deque(maxlen=10)  # Only keep last 10 text captures
+        self.use_caption_mode = tk.BooleanVar(value=False) 
 
         # Add tracking for window IDs to detect leaks
         self.window_counter = 0
@@ -75,8 +83,8 @@ class ScreenOCR:
         
         print("Setting window size...")
         # Set initial size
-        window_width = 300
-        window_height = 550
+        window_width = 280
+        window_height = 600
         x = (self.screen_width - window_width) // 2
         y = (self.screen_height - window_height) // 2
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
@@ -93,10 +101,13 @@ class ScreenOCR:
         
         print("Setting up UI...")
         self.setup_ui()
+        # Set up logging to redirect print to log file
+        self.setup_logging()
+        
         print("Initialization complete.")
     
     def setup_output_directory(self):
-        """Create 'captures' directory in the same folder as the script"""
+        """Create 'captures' and 'config' directories in the same folder as the script"""
         try:
             # Get the path of the script
             if getattr(sys, 'frozen', False):
@@ -111,15 +122,36 @@ class ScreenOCR:
             os.makedirs(self.capture_dir, exist_ok=True)
             print(f"Output directory set to: {self.capture_dir}")
             
+            # Create config directory
+            self.config_dir = os.path.join(script_path, "config")
+            os.makedirs(self.config_dir, exist_ok=True)
+            print(f"Config directory set to: {self.config_dir}")
+            
             # Only try to log if debug_enabled exists
             if hasattr(self, 'debug_enabled'):
                 self.log_debug(f"Output directory created at: {self.capture_dir}")
+                self.log_debug(f"Config directory created at: {self.config_dir}")
         except Exception as e:
-            print(f"Error creating output directory: {str(e)}")
+            print(f"Error creating directories: {str(e)}")
             # Fallback to current directory
             self.capture_dir = "captures"
+            self.config_dir = "config"
             os.makedirs(self.capture_dir, exist_ok=True)
-        
+            os.makedirs(self.config_dir, exist_ok=True)
+            
+    def setup_logging(self):
+        """Set up a logging system to redirect prints to a log file"""
+        # This method no longer needs to redirect stdout since we do it at program start
+        # Instead, it can just log that the application has started
+        try:
+            print(f"ScreenOCR initialization complete at {datetime.now()}")
+        except Exception as e:
+            print(f"Error in setup_logging: {str(e)}")
+
+    def cleanup_logging(self):
+        """Clean up logging resources (handled in main now)"""
+        print(f"Logging ended at {datetime.now()}")
+    
     def setup_ui(self):
         print("Creating main frame...")
         frame = ttk.Frame(self.root, padding="20")
@@ -127,13 +159,18 @@ class ScreenOCR:
         
         print("Adding title...")
         # Title
-        title = ttk.Label(frame, text="CaptiOCR Exp Tool", font=("Arial", 20))
-        title.grid(row=0, column=0, pady=20)
+        title = ttk.Label(frame, text="CaptiOCR Tool", font=("Arial", 20))
+        title.grid(row=1, column=0, pady=10)
+
+        print("Version " + VERSION)
+        # Version
+        version = ttk.Label(frame, text="Version {}".format(VERSION), font=("Arial", 10))
+        version.grid(row=2, column=0, pady=10)
         
         print("Adding language selection...")
         # Language selection
         lang_frame = ttk.LabelFrame(frame, text="Select Language", padding="10")
-        lang_frame.grid(row=1, column=0, pady=10, sticky=(tk.W, tk.E))
+        lang_frame.grid(row=3, column=0, pady=10, sticky=(tk.W, tk.E))
         
         combo = ttk.Combobox(lang_frame, textvariable=self.selected_lang)
         combo['values'] = [lang[0] for lang in self.languages]
@@ -143,12 +180,16 @@ class ScreenOCR:
         print("Adding debug checkbox...")
         # Debug checkbox
         debug_check = ttk.Checkbutton(frame, text="Enable Debug Logging", variable=self.debug_enabled)
-        debug_check.grid(row=2, column=0, pady=10)
+        debug_check.grid(row=4, column=0, pady=5)
+        
+        print("Adding Live Caption Optimization checkbox...")
+        caption_check = ttk.Checkbutton(frame, text="Live Caption Optimization", variable=self.use_caption_mode)
+        caption_check.grid(row=5, column=0, pady=5)
         
         print("Adding preferences buttons...")
         # Add a frame for preferences buttons
         prefs_frame = ttk.Frame(frame)
-        prefs_frame.grid(row=3, column=0, pady=10, sticky=(tk.W, tk.E))
+        prefs_frame.grid(row=6, column=0, pady=5, sticky=(tk.W, tk.E))
         
         # Save preferences button
         save_prefs_btn = ttk.Button(
@@ -156,7 +197,7 @@ class ScreenOCR:
             text="Save Settings", 
             command=self.save_preferences_with_feedback
         )
-        save_prefs_btn.pack(side=tk.LEFT, padx=5, expand=True, fill=tk.X)
+        save_prefs_btn.pack(side=tk.LEFT, padx=2, expand=True, fill=tk.X)
         
         # Load preferences button
         load_prefs_btn = ttk.Button(
@@ -164,40 +205,133 @@ class ScreenOCR:
             text="Load Settings", 
             command=self.load_preferences_with_feedback
         )
-        load_prefs_btn.pack(side=tk.RIGHT, padx=5, expand=True, fill=tk.X)
+        load_prefs_btn.pack(side=tk.RIGHT, padx=2, expand=True, fill=tk.X)
         
         print("Adding start button...")
         # Start button
-        self.start_button = ttk.Button(frame, text="Start (Select Area)", command=self.start_capture)
-        self.start_button.grid(row=4, column=0, pady=20)
+        self.start_button = tk.Button(
+            frame,
+            text="Start (Select Area)",
+            command=self.start_capture,
+            bg="#4CAF50",  # Green background
+            fg="white",
+            font=("Arial", 11),
+            relief=tk.FLAT,
+            padx=10,
+            pady=5,
+            bd=0,
+            activebackground="#0b7dda",
+            cursor="hand2"
+        )
+        self.start_button.grid(row=7, column=0, pady=10)
         
         print("Adding status label...")
         # Status
         self.status_label = ttk.Label(frame, textvariable=self.status_var)
-        self.status_label.grid(row=5, column=0, pady=10)
+        self.status_label.grid(row=8, column=0, pady=10)
         
         print("Adding caption display area...")
         # Caption display area
         caption_frame = ttk.LabelFrame(frame, text="Captured Text", padding="10")
-        caption_frame.grid(row=6, column=0, pady=5, sticky=(tk.W, tk.E))
+        caption_frame.grid(row=9, column=0, pady=5, sticky=(tk.W, tk.E))
         
         print("Adding instructions...")
         # Instructions
         instructions = """
         Instructions:
         1. Select language
-        2. Click 'Start' and position the yellow area
-        3. Press OK to begin OCR
-        4. Press Ctrl+Q or STOP to stop OCR
+        2. Click 'Start' and Drag the Area
+            to Capture
+        3. Press Enter to begin OCR
+        4. Press Ctrl+Q / STOP to stop OCR
+        5. Save Processed File As...
         """
-        ttk.Label(frame, text=instructions, justify=tk.LEFT).grid(row=6, column=0, pady=20)
+        ttk.Label(frame, text=instructions, justify=tk.LEFT).grid(row=10, column=0, pady=20)
         
         # Configure grid
         frame.columnconfigure(0, weight=1)
         print("UI setup complete.")
 
+    def get_ocr_config(self):
+        """Best OCR Recognition - need improoving - """
+        if self.use_caption_mode.get():
+            # Live Caption best Parameters:
+            # PSM 7: text as single line
+            # OEM 1: Use LSTM engine
+            return "--psm 7 --oem 1 -c preserve_interword_spaces=1"
+        else:
+            # General text standart config
+            return ""  # Tesseract predefined
+        
+    def _get_similarity_threshold(self):
+        """Extract the text similarity threshold value"""
+        if hasattr(self, '_text_similarity_threshold'):
+            return self._text_similarity_threshold
+        return 0.8  # Default value
+        
+        if hasattr(self, 'has_significant_new_content'):
+            # Extract threshold from the method if possible
+            import inspect
+            signature = inspect.signature(self.has_significant_new_content)
+            if 'threshold' in signature.parameters:
+                default_threshold = signature.parameters['threshold'].default
+                threshold = default_threshold
+        return threshold
+
+    def _create_preferences_object(self, profile_name="default"):
+        """Create a standardized preferences object"""
+        return {
+            'profile_name': profile_name,
+            'language': self.selected_lang.get(),
+            'debug_enabled': self.debug_enabled.get(),
+            'text_similarity_threshold': self._get_similarity_threshold(),
+            'saved_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        }
+
+    def _save_preferences_to_file(self, prefs, filename):
+        """Save preferences object to a file
+        
+        Args:
+            prefs (dict): The preferences object to save
+            filename (str): Full path to the target file
+            
+        Returns:
+            tuple: (success, error_message)
+        """
+        try:
+            with open(filename, 'w') as f:
+                json.dump(prefs, f, indent=2)
+            print(f"Preferences saved to: {filename}")
+            return True, None
+        except Exception as e:
+            print(f"Error saving preferences: {str(e)}")
+            return False, str(e)
+
+    def _apply_preferences(self, prefs):
+        """Apply loaded preferences to the application
+        
+        Args:
+            prefs (dict): The preferences object to apply
+        """
+        if 'language' in prefs:
+            self.selected_lang.set(prefs['language'])
+            print(f"Set language to: {prefs['language']}")
+        
+        if 'debug_enabled' in prefs:
+            self.debug_enabled.set(prefs['debug_enabled'])
+            print(f"Set debug mode to: {prefs['debug_enabled']}")
+        
+        # Fix for the text_similarity_threshold - handle null values properly
+        if 'text_similarity_threshold' in prefs and prefs['text_similarity_threshold'] is not None:
+            self._text_similarity_threshold = prefs['text_similarity_threshold']
+            print(f"Set text similarity threshold to: {prefs['text_similarity_threshold']}")
+        else:
+            # Set default value if preference is null or missing
+            self._text_similarity_threshold = 0.8
+            print(f"Set text similarity threshold to default value: 0.8")
+        
     def save_preferences_with_feedback(self):
-        """Save preferences with a user-specified name"""
+        """Save preferences with a user-specified name and visual feedback"""
         try:
             # Ask for a preferences profile name
             profile_name = simpledialog.askstring(
@@ -209,33 +343,32 @@ class ScreenOCR:
             # If user cancels or enters nothing, don't save
             if not profile_name:
                 return
-                
+                    
             # Sanitize the profile name (remove special characters, spaces)
             profile_name = re.sub(r'[^\w\-]', '_', profile_name)
             
-            # Create preferences data
-            prefs = {
-                'profile_name': profile_name,
-                'language': self.selected_lang.get(),
-                'debug_enabled': self.debug_enabled.get(),
-                'last_window_position': (self.root.winfo_x(), self.root.winfo_y()),
-                'last_capture_area': self.capture_area if hasattr(self, 'capture_area') else None,
-                'saved_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
+            # Create preferences data using helper method
+            prefs = self._create_preferences_object(profile_name)
             
-            # Create filename based on profile name - FIX 2: nome come prefisso
-            prefs_file = os.path.join(self.capture_dir, f'{profile_name}_preferences.json')
+            # Create filename based on profile name - use config directory
+            prefs_file = os.path.join(self.config_dir, f'{profile_name}_preferences.json')
             
-            # Save to file - FIX 1: salva solo una volta con il nome personalizzato 
-            with open(prefs_file, 'w') as f:
-                json.dump(prefs, f, indent=2)
+            # Save to file using helper method
+            success, error = self._save_preferences_to_file(prefs, prefs_file)
             
-            # Show success message
-            messagebox.showinfo(
-                "Settings Saved", 
-                f"Your preferences have been saved as profile '{profile_name}'.\n\n"
-                f"To load these settings in future, use 'Load Settings' and select this profile."
-            )
+            if success:
+                # Show success message
+                messagebox.showinfo(
+                    "Settings Saved", 
+                    f"Your preferences have been saved as profile '{profile_name}'.\n\n"
+                    f"To load these settings in future, use 'Load Settings' and select this profile."
+                )
+            else:
+                # Show error message
+                messagebox.showerror(
+                    "Error Saving Settings", 
+                    f"Failed to save preferences: {error}"
+                )
         except Exception as e:
             # Show error message
             messagebox.showerror(
@@ -243,12 +376,26 @@ class ScreenOCR:
                 f"Failed to save preferences: {str(e)}"
             )
 
+    def save_preferences(self):
+        """Save current preferences to a default file (used during application shutdown)"""
+        try:
+            # Use a default name
+            default_profile_name = "default"
+            
+            # Create preferences object using helper method
+            prefs = self._create_preferences_object(default_profile_name)
+            
+            # Save to config directory
+            prefs_file = os.path.join(self.config_dir, f'{default_profile_name}_preferences.json')
+            self._save_preferences_to_file(prefs, prefs_file)
+        except Exception as e:
+            print(f"Error saving preferences: {str(e)}")
+
     def load_preferences_with_feedback(self):
         """Load preferences with option to select from different profiles"""
         try:
-            # Get all preference files in the capture directory
-            # Modifica per cercare file che terminano con preferences.json
-            prefs_files = [f for f in os.listdir(self.capture_dir) 
+            # Get all preference files in the config directory
+            prefs_files = [f for f in os.listdir(self.config_dir) 
                           if f.endswith('_preferences.json')]
             
             if not prefs_files:
@@ -260,7 +407,7 @@ class ScreenOCR:
                 
             # If only one file exists, load it directly
             if len(prefs_files) == 1:
-                file_to_load = os.path.join(self.capture_dir, prefs_files[0])
+                file_to_load = os.path.join(self.config_dir, prefs_files[0])
             else:
                 # Create a dialog to select which profile to load
                 profile_window = tk.Toplevel(self.root)
@@ -281,7 +428,7 @@ class ScreenOCR:
                 # Add profiles to listbox with readable names
                 for i, file in enumerate(prefs_files):
                     # Extract profile info if available
-                    profile_path = os.path.join(self.capture_dir, file)
+                    profile_path = os.path.join(self.config_dir, file)
                     try:
                         with open(profile_path, 'r') as f:
                             data = json.load(f)
@@ -323,20 +470,14 @@ class ScreenOCR:
                     return
                     
                 # Get the selected file
-                file_to_load = os.path.join(self.capture_dir, prefs_files[selected_index[0]])
+                file_to_load = os.path.join(self.config_dir, prefs_files[selected_index[0]])
             
             # Load the preferences from the selected file
             with open(file_to_load, 'r') as f:
                 prefs = json.load(f)
                 
-            # Apply loaded preferences
-            if 'language' in prefs:
-                self.selected_lang.set(prefs['language'])
-            if 'debug_enabled' in prefs:
-                self.debug_enabled.set(prefs['debug_enabled'])
-            if 'last_capture_area' in prefs and prefs['last_capture_area']:
-                self.capture_area = tuple(prefs['last_capture_area'])
-                print(f"Loaded previous capture area: {self.capture_area}")
+            # Apply loaded preferences using helper method
+            self._apply_preferences(prefs)
             
             # Get profile name for message
             profile_name = prefs.get('profile_name', os.path.basename(file_to_load).replace('_preferences.json', ''))
@@ -346,11 +487,8 @@ class ScreenOCR:
             msg += f"• Language: {self.selected_lang.get()}\n"
             msg += f"• Debug mode: {'Enabled' if self.debug_enabled.get() else 'Disabled'}\n"
             
-            if hasattr(self, 'capture_area') and self.capture_area:
-                x1, y1, x2, y2 = self.capture_area
-                width = x2 - x1
-                height = y2 - y1
-                msg += f"• Previous capture area loaded: {width}x{height} pixels\n"
+            if hasattr(self, '_text_similarity_threshold'):
+                msg += f"• Text similarity threshold: {self._text_similarity_threshold}\n"
             
             if 'saved_date' in prefs:
                 msg += f"\nSaved on: {prefs['saved_date']}"
@@ -365,30 +503,38 @@ class ScreenOCR:
             )
             import traceback
             traceback.print_exc()
-
-    # Aggiornamento funzione save_preferences per coerenza
-    def save_preferences(self):
-        """Save current preferences to a file"""
+        
+    def load_preferences(self):
+        """Load preferences from file"""
         try:
-            # Use a default name if we need to save without user interaction
-            default_profile_name = "default"
+            # First try to load from config directory
+            prefs_file = os.path.join(self.config_dir, 'default_preferences.json')
             
-            prefs = {
-                'profile_name': default_profile_name,
-                'language': self.selected_lang.get(),
-                'debug_enabled': self.debug_enabled.get(),
-                'last_window_position': (self.root.winfo_x(), self.root.winfo_y()),
-                'last_capture_area': self.capture_area if hasattr(self, 'capture_area') else None,
-                'saved_date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            }
+            # If file doesn't exist in config_dir, check in capture_dir (for backward compatibility)
+            if not os.path.exists(prefs_file):
+                old_prefs_file = os.path.join(self.capture_dir, 'default_preferences.json') 
+                if os.path.exists(old_prefs_file):
+                    print(f"Found preferences in old location: {old_prefs_file}")
+                    prefs_file = old_prefs_file
+                else:
+                    print(f"No preference file found at {prefs_file} or {old_prefs_file}")
+                    return
             
-            # Usa il prefisso per coerenza con le altre funzioni
-            prefs_file = os.path.join(self.capture_dir, f'{default_profile_name}_preferences.json')
-            with open(prefs_file, 'w') as f:
-                json.dump(prefs, f)
-            print(f"Preferences saved to: {prefs_file}")
+            # Load and parse the JSON file
+            print(f"Attempting to load preferences from: {prefs_file}")
+            with open(prefs_file, 'r') as f:
+                prefs = json.load(f)
+            
+            print(f"Loaded preferences: {prefs}")
+            
+            # Apply loaded preferences using helper method
+            self._apply_preferences(prefs)
+                    
+            print(f"Preferences successfully loaded from: {prefs_file}")
         except Exception as e:
-            print(f"Error saving preferences: {str(e)}")
+            print(f"Error loading preferences: {str(e)}")
+            import traceback
+            traceback.print_exc()  # This will print the full error with line numbers
 
     def log_debug(self, message):
         if self.debug_enabled.get():
@@ -396,7 +542,14 @@ class ScreenOCR:
             log_path = os.path.join(self.capture_dir, "ocr_debug.log")
             with open(log_path, "a", encoding='utf-8') as f:
                 f.write(f"{timestamp}: {message}\n")
+                f.flush()
 
+    def log_with_flush(self, message):
+        """Log a message and immediately flush the output"""
+        print(message, flush=True)
+        if hasattr(self, 'log_debug') and self.debug_enabled.get():
+            self.log_debug(message)
+        
     def get_lang_code(self):
         selected = self.selected_lang.get()
         return next(lang[1] for lang in self.languages if lang[0] == selected)
@@ -572,12 +725,13 @@ class ScreenOCR:
             if hasattr(self, 'canvas') and self.canvas is not None:
                 self.canvas = None
             # Re-enable start button on error
-            self.start_button.state(['!disabled'])
+            self.start_button['state'] = tk.NORMAL
             
             # Ensure the error is propagated
             raise
 
     def start_selection(self, event):
+        self.log_with_flush(f"Selection started at: Canvas ({event.x}, {event.y}), Root ({event.x_root}, {event.y_root})")
         print(f"Selection started at: Canvas ({event.x}, {event.y}), Root ({event.x_root}, {event.y_root})")
         
         # Clear any existing rectangle from previous selection attempts
@@ -671,9 +825,7 @@ class ScreenOCR:
                 print(f"Selection size: {width}x{height}")
                 
                 # Destroy selection window
-                if self.selection_window:
-                    self.selection_window.destroy()
-                    self.selection_window = None
+                self.destroy_window('selection_window')
                 
                 # Start OCR
                 self.start_ocr()
@@ -683,7 +835,9 @@ class ScreenOCR:
             else:
                 print("No selection coordinates found")
                 messagebox.showwarning("Warning", "Please select an area first")
-                
+            
+            sys.stdout.flush()
+                    
         except Exception as e:
             print(f"Error confirming selection: {str(e)}")
             messagebox.showerror("Error", f"Failed to confirm selection: {str(e)}")
@@ -702,144 +856,41 @@ class ScreenOCR:
         # Reset capture variables
         self.capture_stop_flag = False
         
-        # IMPROVED: More thorough cleanup of canvas
-        if hasattr(self, 'canvas') and self.canvas is not None:
-            try:
-                # First check if the canvas still exists in the widget hierarchy
-                try:
-                    canvas_exists = self.canvas.winfo_exists()
-                    if canvas_exists:
-                        # Unbind all events
-                        self.canvas.unbind('<ButtonPress-1>')
-                        self.canvas.unbind('<B1-Motion>')
-                        self.canvas.unbind('<ButtonRelease-1>')
-                        
-                        # Clear all items
-                        self.canvas.delete("all")
-                        print("Canvas cleared")
-                    else:
-                        print("Canvas no longer exists, skipping clear")
-                except Exception as e:
-                    print(f"Error checking canvas existence: {str(e)}")
-            except Exception as e:
-                print(f"Error with canvas: {str(e)}")
-            finally:
-                self.canvas = None
+        # Use the unified method to destroy windows
+        self.destroy_window('selection_window')
         
-        # IMPROVED: More thorough cleanup of selection window
-        if hasattr(self, 'selection_window') and self.selection_window is not None:
-            try:
-                # Check if the window still exists
-                try:
-                    window_exists = self.selection_window.winfo_exists()
-                    if window_exists:
-                        print("Selection window still exists during reset")
-                        
-                        # Unbind all events
-                        if hasattr(self, 'selection_bindings'):
-                            for binding in self.selection_bindings:
-                                try:
-                                    self.selection_window.unbind(binding)
-                                except Exception as e:
-                                    print(f"Error unbinding event: {str(e)}")
-                        
-                        # Destroy all child widgets first
-                        for widget in self.selection_window.winfo_children():
-                            try:
-                                widget.destroy()
-                            except Exception as e:
-                                print(f"Error destroying widget: {str(e)}")
-                        
-                        # Then destroy the window itself
-                        self.selection_window.destroy()
-                        print("Selection window destroyed during reset")
-                    else:
-                        print("Selection window no longer valid")
-                except Exception as e:
-                    print(f"Error checking selection window existence: {str(e)}")
-            except Exception as e:
-                print(f"Selection window error: {str(e)}")
-            finally:
-                self.selection_window = None
-                
-        # IMPROVED: Clear references to the instruction label
-        if hasattr(self, 'instruction_label'):
-            self.instruction_label = None
-            
-        # IMPROVED: Clear bindings list
-        if hasattr(self, 'selection_bindings'):
-            self.selection_bindings = []
-            
-        # IMPROVED: Force garbage collection to clean up unreferenced windows
+        # Clean up canvas and other references
+        self.canvas = None
+        self.instruction_label = None
+        self.selection_bindings = []
+        
+        # Force garbage collection to clean up unreferenced windows
         import gc
-        gc.collect()      
+        gc.collect()
+        
     def cancel_selection(self, event=None):
         """Cancel the selection process"""
         try:
             print("Cancelling selection")
             
-            # IMPROVED: More thorough window cleanup
-            if hasattr(self, 'selection_window') and self.selection_window is not None:
-                # Unbind events first
-                try:
-                    if hasattr(self, 'selection_bindings'):
-                        for binding in self.selection_bindings:
-                            try:
-                                self.selection_window.unbind(binding)
-                            except Exception as e:
-                                print(f"Error unbinding event: {str(e)}")
-                except Exception as e:
-                    print(f"Error unbinding events: {str(e)}")
-                    
-                # Destroy all child widgets
-                try:
-                    if self.selection_window.winfo_exists():
-                        for widget in self.selection_window.winfo_children():
-                            try:
-                                widget.destroy()
-                            except Exception as e:
-                                print(f"Error destroying widget: {str(e)}")
-                except Exception as e:
-                    print(f"Error destroying child widgets: {str(e)}")
-                    
-                # Finally destroy the window itself
-                try:
-                    if self.selection_window.winfo_exists():
-                        self.selection_window.destroy()
-                except Exception as e:
-                    print(f"Error destroying selection window: {str(e)}")
-                    
-                # Clear the reference
-                self.selection_window = None
-                import gc
-                gc.collect()
+            # Use the unified method to destroy the window
+            self.destroy_window('selection_window')
             
-            # Clear canvas reference
-            if hasattr(self, 'canvas'):
-                self.canvas = None
-                
-            # Clear instruction label reference
-            if hasattr(self, 'instruction_label'):
-                self.instruction_label = None
-                
-            # Clear bindings list
-            if hasattr(self, 'selection_bindings'):
-                self.selection_bindings = []
-            
-            # IMPROVED: Force garbage collection
-            import gc
-            gc.collect()
+            # Clean up canvas and label references
+            self.canvas = None
+            self.instruction_label = None
             
             # Re-enable start button
-            self.start_button.state(['!disabled'])
+            self.start_button['state'] = tk.NORMAL
             self.status_var.set("Selection cancelled")
         except Exception as e:
             print(f"Error cancelling selection: {str(e)}")
             # Ensure button is re-enabled even on error
             try:
-                self.start_button.state(['!disabled'])
+                self.start_button['state'] = tk.NORMAL
             except Exception as btn_err:
                 print(f"Error re-enabling button: {str(btn_err)}")
+            
     def text_similarity(self, text1: str, text2: str) -> float:
         """Calculate similarity ratio between two texts"""
         return difflib.SequenceMatcher(None, text1, text2).ratio()
@@ -925,10 +976,15 @@ class ScreenOCR:
             # Ensure we clean up on error
             self.drag_start_x = None
             self.drag_start_y = None
-    def has_significant_new_content(self, new_text, previous_text, threshold=0.8):
-        """
-        Enhanced method to filter out OCR noise and partial captures
-        """
+
+    def has_significant_new_content(self, new_text, previous_text, threshold=None):
+        # Enhanced method to filter out OCR noise and partial captures
+        # Use stored threshold if available and none is provided
+        if threshold is None and hasattr(self, '_text_similarity_threshold'):
+            threshold = self._text_similarity_threshold
+        elif threshold is None:
+            threshold = 0.8  # Default value
+
         # Remove very short fragments and pure noise
         if len(new_text) < 10:
             return False
@@ -1182,7 +1238,11 @@ class ScreenOCR:
                         )
                     
                     # Perform OCR
-                    raw_text = pytesseract.image_to_string(screenshot, lang=self.get_lang_code()).strip()
+                    raw_text = pytesseract.image_to_string(
+                        screenshot, 
+                        lang=self.get_lang_code(),
+                        config=self.get_ocr_config()  # Best Live Caption configuration
+                    ).strip()
                     
                     # Release screenshot to free memory
                     del screenshot
@@ -1307,16 +1367,18 @@ class ScreenOCR:
             self.status_var.set("Select area and press OK or Enter")
             self.reset_selection_state()  # Reset any previous selection state
             self.create_selection_window()
-            self.start_button.state(['disabled'])
+            self.start_button['state'] = tk.DISABLED        
         except Exception as e:
             print(f"Error in start_capture: {str(e)}")
             messagebox.showerror("Error", f"Failed to start capture: {str(e)}")
-            self.start_button.state(['!disabled'])  # Re-enable the button on error
+            self.start_button['state'] = tk.NORMAL  # Re-enable the button on error
         
     def start_ocr(self):
         """Start the OCR process after area selection"""
         try:
-            print("========== STARTING OCR ==========")
+            print("========== STARTING OCR CAPTURE ==========")
+            
+            print(f"OCR s=Started at {datetime.now()}")
             
             # Verify we have a selected area
             if not hasattr(self, 'capture_area') or not self.capture_area:
@@ -1353,7 +1415,7 @@ class ScreenOCR:
             self.running = False
             
             # Re-enable start button on error
-            self.start_button.state(['!disabled'])
+            self.start_button['state'] = tk.NORMAL
 
     def start_drag_capture(self, event):
         """Start dragging the capture window"""
@@ -1386,7 +1448,9 @@ class ScreenOCR:
             # Set flag to prevent multiple stop operations
             self._stopping = True
             
-            print("========== STOP CAPTURE ==========")
+            print("========== STOP OCR CAPTURE ==========")
+            
+            print(f"OCR Stopped at {datetime.now()}")
             
             # Set all stop flags
             with self.thread_lock:
@@ -1396,29 +1460,7 @@ class ScreenOCR:
             
             # Thread-safe capture window handling
             def destroy_capture_window():
-                if hasattr(self, 'capture_window') and self.capture_window is not None:
-                    try:
-                        if self.capture_window.winfo_exists():
-                            print("Destroying capture window")
-                            # Unbind all events
-                            self.capture_window.unbind('<Button-1>')
-                            self.capture_window.unbind('<B1-Motion>')
-                            self.capture_window.unbind('<ButtonRelease-1>')
-                            
-                            # Destroy the window
-                            self.capture_window.destroy()
-                            print("Capture window destroyed successfully")
-                        else:
-                            print("Capture window reported as not existing")
-                    except Exception as e:
-                        print(f"Window destruction error: {str(e)}")
-                    finally:
-                        # Always set to None with clear messaging
-                        print("Setting capture_window to None")
-                        self.capture_window = None
-                        # Clear reference to prevent memory leaks
-                        if hasattr(self.root, 'capture_window_ref'):
-                            delattr(self.root, 'capture_window_ref')
+                self.destroy_window('capture_window')
             
             # Execute window destruction on main thread
             self.root.after(0, destroy_capture_window)
@@ -1426,27 +1468,22 @@ class ScreenOCR:
             # Add a small delay to allow window destruction to complete
             time.sleep(0.3)
             
-            # Wait for capture thread with better timeout handling
-            if hasattr(self, 'capture_thread') and self.capture_thread is not None:
-                if self.capture_thread.is_alive():
-                    print("Waiting for capture thread to terminate...")
-                    try:
-                        # Increase timeout and add multiple attempts
-                        for attempt in range(3):
-                            self.capture_thread.join(timeout=0.5)
-                            if not self.capture_thread.is_alive():
-                                print(f"Capture thread terminated after attempt {attempt+1}")
-                                break
-                        
-                        if self.capture_thread.is_alive():
-                            print("WARNING: Capture thread still alive after multiple attempts")
-                    except Exception as e:
-                        print(f"Error joining capture thread: {str(e)}")
-                else:
-                    print("Capture thread is not alive, no need to join")
-                
-                # Set to None after handling
-                self.capture_thread = None
+            # Improved capture thread handling - single check and join
+            capture_thread = self.capture_thread  # Get local reference to avoid race conditions
+            if capture_thread is not None and capture_thread.is_alive():
+                print("Joining capture thread...")
+                try:
+                    # Single join with adequate timeout
+                    capture_thread.join(timeout=1.5)
+                    if capture_thread.is_alive():
+                        print("WARNING: Capture thread did not terminate within timeout")
+                    else:
+                        print("Capture thread terminated successfully")
+                except Exception as e:
+                    print(f"Error joining capture thread: {str(e)}")
+            
+            # Clear the reference regardless of success
+            self.capture_thread = None
             
             # Reset all selection and capture variables
             self.selection_coords = None
@@ -1465,13 +1502,19 @@ class ScreenOCR:
                 if hasattr(self, 'current_capture_timestamp') and self.current_capture_timestamp:
                     # Process the latest capture file if needed
                     latest_file = self.find_latest_capture_file()
+                    print(f"Latest capture file found: {latest_file}")
                     if latest_file and (not hasattr(self, 'last_processed_file') or self.last_processed_file != latest_file):
+                        print(f"Processing file: {latest_file}")
                         # Ask user for a name
                         custom_name = self.prompt_for_filename()
+                        print(f"User provided name: {custom_name if custom_name else '(none/canceled)'}")
                         
                         # Process the file
-                        self.post_process_capture_file(latest_file, custom_name)
-                        self.last_processed_file = latest_file
+                        processed_file = self.post_process_capture_file(latest_file, custom_name)
+
+                        if processed_file:
+                            self.last_processed_file = latest_file
+                            print(f"File processing complete. Result saved to: {processed_file}")
                         
                         if custom_name:
                             self.status_var.set(f"Capture stopped and saved with name: {custom_name}")
@@ -1481,13 +1524,14 @@ class ScreenOCR:
                         # Reset timestamp to prevent processing again
                         self.current_capture_timestamp = None
                     else:
+                        print(f"No new file to process. Latest: {latest_file}, Last processed: {getattr(self, 'last_processed_file', None)}")
                         self.status_var.set("Capture stopped (no new file to process)")
                 else:
-                    print("No capture in progress, skipping file processing")
+                    print(f"No capture in progress (timestamp: {getattr(self, 'current_capture_timestamp', None)}), skipping file processing")
                     self.status_var.set("Ready")
                 
                 # Re-enable the start button
-                self.start_button.state(['!disabled'])
+                self.start_button['state'] = tk.NORMAL
             
             # Execute file processing on main thread
             self.root.after(0, process_files)
@@ -1506,7 +1550,7 @@ class ScreenOCR:
             def handle_error():
                 # Ensure button is re-enabled
                 try:
-                    self.start_button.state(['!disabled'])
+                    self.start_button['state'] = tk.NORMAL
                 except:
                     pass
                     
@@ -1564,21 +1608,18 @@ class ScreenOCR:
             # Ensure all windows are destroyed
             windows_to_check = ['selection_window', 'capture_window']
             for window_name in windows_to_check:
-                if hasattr(self, window_name) and getattr(self, window_name) is not None:
-                    try:
-                        window = getattr(self, window_name)
-                        if window.winfo_exists():
-                            window.destroy()
-                            print(f"{window_name} destroyed during shutdown")
-                    except Exception as win_err:
-                        print(f"Error destroying {window_name}: {str(win_err)}")
+                self.destroy_window(window_name)
             
             # Force garbage collection before exiting
             import gc
             gc.collect()
             
             # Final goodbye message
-            print(f"Application closed. Files saved in: {self.capture_dir}")
+            print(f"Application closed at at {datetime.now()}")
+            print(f"Files saved in: {self.capture_dir}")
+            # Clean up logging before exit
+            if hasattr(self, 'cleanup_logging'):
+                self.cleanup_logging()
             
             # Destroy the main window
             self.root.destroy()
@@ -1594,26 +1635,128 @@ class ScreenOCR:
             except:
                 pass
 
+    def destroy_window(self, window_attr_name):
+        """
+        Unified method to safely destroy a window.
+        
+        Args:
+            window_attr_name (str): The name of the window attribute to destroy
+        
+        Returns:
+            bool: True if the window was successfully destroyed, False otherwise
+        """
+        try:
+            # Check if the attribute exists and is not None
+            if not hasattr(self, window_attr_name) or getattr(self, window_attr_name) is None:
+                print(f"Window {window_attr_name} doesn't exist or is None, no action required")
+                return False
+                
+            window = getattr(self, window_attr_name)
+            
+            # Check if the window still exists in the Tkinter system
+            window_exists = False
+            try:
+                window_exists = window.winfo_exists()
+            except Exception as e:
+                print(f"Error checking if window {window_attr_name} exists: {str(e)}")
+                
+            if not window_exists:
+                print(f"Window {window_attr_name} no longer exists in Tkinter system")
+                setattr(self, window_attr_name, None)
+                return False
+                
+            # Collect all bindings to remove
+            bindings_attr_name = f"{window_attr_name}_bindings"
+            if hasattr(self, bindings_attr_name) and getattr(self, bindings_attr_name):
+                bindings = getattr(self, bindings_attr_name)
+                for binding in bindings:
+                    try:
+                        window.unbind(binding)
+                    except Exception as e:
+                        print(f"Error unbinding event in {window_attr_name}: {str(e)}")
+                # Clear the bindings list
+                setattr(self, bindings_attr_name, [])
+            
+            # Unbind common events
+            for event in ['<Button-1>', '<B1-Motion>', '<ButtonRelease-1>', '<Return>', '<Escape>']:
+                try:
+                    window.unbind(event)
+                except Exception as e:
+                    print(f"Error unbinding event {event} in {window_attr_name}: {str(e)}")
+                    
+            # Destroy all child widgets
+            for widget in window.winfo_children():
+                try:
+                    widget.destroy()
+                except Exception as e:
+                    print(f"Error destroying child widget in {window_attr_name}: {str(e)}")
+                    
+            # Destroy the window
+            try:
+                window.destroy()
+                print(f"Window {window_attr_name} was successfully destroyed")
+            except Exception as e:
+                print(f"Error destroying window {window_attr_name}: {str(e)}")
+                
+            # Set the attribute to None
+            setattr(self, window_attr_name, None)
+            
+            # Force garbage collection
+            import gc
+            gc.collect()
+            
+            return True
+        except Exception as e:
+            print(f"Critical error during destruction of window {window_attr_name}: {str(e)}")
+            # Still set the attribute to None for safety
+            try:
+                setattr(self, window_attr_name, None)
+            except:
+                pass
+            return False
+        
     def load_preferences(self):
         """Load preferences from file"""
         try:
-            prefs_file = os.path.join(self.capture_dir, 'preferences.json')
-            if os.path.exists(prefs_file):
-                with open(prefs_file, 'r') as f:
-                    prefs = json.load(f)
+            # First try to load from config directory
+            prefs_file = os.path.join(self.config_dir, 'default_preferences.json')
+            
+            # If file doesn't exist in config_dir, check in capture_dir (for backward compatibility)
+            if not os.path.exists(prefs_file):
+                old_prefs_file = os.path.join(self.capture_dir, 'default_preferences.json') 
+                if os.path.exists(old_prefs_file):
+                    print(f"Found preferences in old location: {old_prefs_file}")
+                    prefs_file = old_prefs_file
+                else:
+                    print(f"No preference file found at {prefs_file} or {old_prefs_file}")
+                    return
+            
+            # Load and parse the JSON file
+            print(f"Attempting to load preferences from: {prefs_file}")
+            with open(prefs_file, 'r') as f:
+                prefs = json.load(f)
+            
+            print(f"Loaded preferences: {prefs}")
+                
+            # Apply loaded preferences
+            if 'language' in prefs:
+                self.selected_lang.set(prefs['language'])
+                print(f"Set language to: {prefs['language']}")
+            
+            if 'debug_enabled' in prefs:
+                self.debug_enabled.set(prefs['debug_enabled'])
+                print(f"Set debug mode to: {prefs['debug_enabled']}")
+            
+            if 'text_similarity_threshold' in prefs:
+                # Store this value for use in has_significant_new_content
+                self._text_similarity_threshold = prefs['text_similarity_threshold']
+                print(f"Set text similarity threshold to: {prefs['text_similarity_threshold']}")
                     
-                # Apply loaded preferences
-                if 'language' in prefs:
-                    self.selected_lang.set(prefs['language'])
-                if 'debug_enabled' in prefs:
-                    self.debug_enabled.set(prefs['debug_enabled'])
-                if 'last_capture_area' in prefs and prefs['last_capture_area']:
-                    self.capture_area = tuple(prefs['last_capture_area'])
-                    print(f"Loaded previous capture area: {self.capture_area}")
-                    
-                print(f"Preferences loaded from: {prefs_file}")
+            print(f"Preferences successfully loaded from: {prefs_file}")
         except Exception as e:
             print(f"Error loading preferences: {str(e)}")
+            import traceback
+            traceback.print_exc()  # This will print the full error with line numbers
             
     def find_latest_capture_file(self):
         """Find the most recent capture file in the capture directory, ignoring processed files"""
@@ -1657,7 +1800,17 @@ class ScreenOCR:
                     
             if current_block:
                 blocks.append(current_block)
+            
+            # Check if blocks list is empty before trying to access the first element
+            if not blocks:
+                print("No text blocks found in capture file.")
+                # Create an empty block with header to avoid errors
+                empty_block = [f"[{datetime.now().strftime('%H:%M:%S')}] No text was captured.\n"]
+                blocks.append(empty_block)
                 
+            # Now it's safe to access blocks[0]
+            unique_blocks = [blocks[0]]  # Keep the first block
+
             # Filter out blocks with duplicate content
             unique_blocks = [blocks[0]]  # Keep the first block
             
@@ -1705,17 +1858,73 @@ class ScreenOCR:
             print(f"Original blocks: {len(blocks)}, After processing: {len(unique_blocks)}")
             print(f"Processed file saved as: {processed_filepath}")
             
+            # Log additional success information
+            print(f"File successfully processed at {datetime.now()}")
+            print(f"Original file: {filepath}")
+            print(f"New processed file: {processed_filepath}")
+
+            # Add debug logging if enabled
+            if hasattr(self, 'debug_enabled') and self.debug_enabled.get():
+                self.log_debug(f"Successfully processed file '{filepath}' to '{processed_filepath}'")
+                
+            return processed_filepath  # Return the path to the new file
+            
         except Exception as e:
             print(f"Error in post-processing: {str(e)}")
             import traceback
             traceback.print_exc()
+            return None
         
 if __name__ == "__main__":
     try:
+        # Set up early logging before any prints
+        import sys
+        import os
+        from datetime import datetime
+        
+        # Determine script path
+        if getattr(sys, 'frozen', False):
+            script_path = os.path.dirname(sys.executable)
+        else:
+            script_path = os.path.dirname(os.path.abspath(__file__))
+        
+        # Create logs directory
+        logs_dir = os.path.join(script_path, "logs")
+        os.makedirs(logs_dir, exist_ok=True)
+        
+        # Create log file with timestamp
+        timestamp = datetime.now().strftime('%Y-%m-%d %H-%M-%S')
+        log_filename = f"log_{timestamp}.txt"
+        log_file_path = os.path.join(logs_dir, log_filename)
+        
+        # Open log file and redirect stdout
+        log_file = open(log_file_path, 'w', encoding='utf-8', buffering=1)
+        sys.stdout = log_file
+        print(f"Logs directory created at: {logs_dir}")
+        
+        print(f"Logging started at {datetime.now()}")
+        
+        print(f"CaptiOCR Version: {VERSION}")
+        
+        # Now create the application
         print("Creating application instance...")
         app = ScreenOCR()
+        
         print("Running application...")
         app.run()
+        
     except Exception as e:
+        # Print the error to the log if possible
         print(f"Critical error: {str(e)}")
+        
+        # Make sure we restore stdout before displaying message to user
+        if 'log_file' in locals() and log_file:
+            sys.stdout = sys.__stdout__  # Restore to system default stdout
+        
+        # Show error in UI if possible
         input("Press Enter to exit...")
+        
+    finally:
+        # Make sure log file is closed
+        if 'log_file' in locals() and log_file:
+            log_file.close()
