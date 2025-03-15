@@ -21,71 +21,45 @@ TESSDATA_PREFIX = r'C:\Program Files\Tesseract-OCR\tessdata'
 TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # Update on every published Version
-VERSION = "v0.8.2-alpha 13/03/2025"
+# Read version from file
+try:
+    with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt"), "r") as f:
+        VERSION = f"{f.read().strip()} {datetime.now().strftime('%d/%m/%Y')}"
+except Exception as e:
+    print(f"Error reading version: {str(e)}")
+    VERSION = "unknown version"
 
 def set_window_icon(root):
-    """
-    Set the application window icon with dynamic path detection.
-    
-    Args:
-        root (tk.Tk): The main Tkinter window
-    """
+    """Set the application window icon from the standard resources directory"""
     try:
-        # Determine the base path of the application
+        # Determine the base path
         if getattr(sys, 'frozen', False):
-            # Running as compiled executable
             base_path = os.path.dirname(sys.executable)
         else:
-            # Running as script
             base_path = os.path.dirname(os.path.abspath(__file__))
         
-        # Potential icon filenames
-        icon_filenames = [
-            "icon.ico", 
-            "CaptiOCR.ico", 
-            "app_icon.ico"
-        ]
+        # Standard icon path
+        icon_path = os.path.join(base_path, 'resources', 'icon.ico')
         
-        # Potential search paths
-        search_paths = [
-            base_path,  # Same directory as script/executable
-            os.path.join(base_path, 'assets'),  # assets subdirectory
-            os.path.join(base_path, 'resources'),  # resources subdirectory
-            os.path.expanduser('~'),  # User home directory
-        ]
+        print(f"Looking for icon at: {icon_path}")
         
-        # Comprehensive icon search
-        for search_path in search_paths:
-            for filename in icon_filenames:
-                icon_path = os.path.join(search_path, filename)
-                
-                # Detailed logging
-                print(f"Checking icon path: {icon_path}")
-                
-                if os.path.exists(icon_path):
-                    print(f"Found icon at: {icon_path}")
-                    
-                try:
-                    root.iconbitmap(icon_path)
-                    print("Icon set successfully using iconbitmap")
-                    return True
-                except Exception as e1:
-                    print(f"iconbitmap failed: {e1}")
-                    try:
-                        icon = tk.PhotoImage(file=icon_path)
-                        root.iconphoto(True, icon)
-                        # Keep a reference to the image to prevent garbage collection
-                        root._icon = icon
-                        print("Icon set successfully using PhotoImage")
-                        return True
-                    except Exception as e2:
-                        print(f"PhotoImage failed: {e2}")
-        
-        print("Warning: No application icon found in standard locations")
-        return False
-    
+        if os.path.exists(icon_path):
+            root.iconbitmap(icon_path)
+            print(f"Icon set from: {icon_path}")
+            return True
+        else:
+            print(f"Icon not found at: {icon_path}")
+            
+            # Crea un'icona fallback semplice
+            canvas = tk.Canvas(width=16, height=16)
+            canvas.create_rectangle(0, 0, 16, 16, fill="#4CAF50", outline="")
+            fallback_icon = tk.PhotoImage(canvas.postscript(colormode='color'))
+            root.iconphoto(True, fallback_icon)
+            root._icon = fallback_icon  # Mantieni un riferimento per evitare il garbage collection
+            print("Created fallback icon")
+            return True
     except Exception as e:
-        print(f"Critical error setting window icon: {e}")
+        print(f"Error setting icon: {e}")
         return False
 
 class CaptureConfig:
@@ -103,7 +77,6 @@ class CaptureConfig:
         self.current_interval = self.DEFAULT_MIN_INTERVAL
         self.max_similar_captures = self.MAX_SIMILAR_CAPTURES
         self.on_interval_change = None  # Callback for interval changes
-        # self.logger = None  # Logger function
     
         # Logger function
         self._logger = print  # Default to standard print if no logger set
@@ -335,53 +308,37 @@ class ScreenOCR:
         print(f"Capture interval updated to {interval:.1f} seconds")
 
     def setup_output_directory(self):
-        """Create 'captures', 'config', and 'logs' directories in the same folder as the program if possible"""
+        """Set paths to standard directories created during installation"""
         try:
-            # Get the path of the script
+            # Get the path of the executable or script
             if getattr(sys, 'frozen', False):
                 # For compiled executables
-                script_path = os.path.dirname(sys.executable)
+                base_path = os.path.dirname(sys.executable)
             else:
                 # For .py script
-                script_path = os.path.dirname(os.path.abspath(__file__))
+                base_path = os.path.dirname(os.path.abspath(__file__))
             
-            # Try to create a test file to check write permissions
-            test_file = os.path.join(script_path, "write_test.tmp")
-            try:
-                with open(test_file, 'w') as f:
-                    f.write("test")
-                os.remove(test_file)
-                # If we can write to this directory, use it
-                base_path = script_path
-            except PermissionError:
-                # If we can't write to the executable directory, use AppData instead
-                print("No write permission in app directory, using AppData instead")
-                base_path = os.path.join(os.environ.get('LOCALAPPDATA', ''), "CaptiOCR")
-                os.makedirs(base_path, exist_ok=True)
-            
-            # Create captures directory
+            # Set paths to standard directories
             self.capture_dir = os.path.join(base_path, "captures")
-            os.makedirs(self.capture_dir, exist_ok=True)
-            print(f"Output directory set to: {self.capture_dir}")
-            
-            # Create config directory
             self.config_dir = os.path.join(base_path, "config")
-            os.makedirs(self.config_dir, exist_ok=True)
-            print(f"Config directory set to: {self.config_dir}")
-            
-            # Create logs directory
             self.logs_dir = os.path.join(base_path, "logs")
-            os.makedirs(self.logs_dir, exist_ok=True)
-            print(f"Logs directory set to: {self.logs_dir}")
+            self.resources_dir = os.path.join(base_path, "resources")
+            self.tessdata_dir = os.path.join(base_path, "tessdata")
             
-            # Only try to log if debug_enabled exists
-            if hasattr(self, 'debug_enabled'):
-                self.log_debug(f"Output directory created at: {self.capture_dir}")
-                self.log_debug(f"Config directory created at: {self.config_dir}")
-                self.log_debug(f"Logs directory created at: {self.logs_dir}")
+            # Verify directories exist (they should be created by installer)
+            required_dirs = [self.capture_dir, self.config_dir, self.logs_dir, 
+                            self.resources_dir, self.tessdata_dir]
+            
+            for directory in required_dirs:
+                if not os.path.exists(directory):
+                    os.makedirs(directory, exist_ok=True)
+                    print(f"Created missing directory: {directory}")
+                else:
+                    print(f"Using directory: {directory}")
+            
         except Exception as e:
-            print(f"Error creating directories: {str(e)}")
-            # Fallback to current directory
+            print(f"Error setting up directories: {str(e)}")
+            # Use current directory as fallback for critical directories
             self.capture_dir = "captures"
             self.config_dir = "config"
             self.logs_dir = "logs"
@@ -472,7 +429,7 @@ class ScreenOCR:
 
         print("Version " + VERSION)
         # Version
-        version = ttk.Label(frame, text="Version {}".format(VERSION), font=("Arial", 10))
+        version = ttk.Label(frame, text="Version {}".format(VERSION), font=("Arial", 8))
         version.grid(row=row, column=0, pady=5, sticky=tk.N)
         row += 1	# Increment row
         
@@ -588,71 +545,38 @@ class ScreenOCR:
         print("Menu bar setup complete")
 
     def initialize_tesseract(self):
-        """
-        Initialize Tesseract with robust path detection
-        """
+        """Initialize Tesseract using predefined constants"""
         try:
-            # Common Tesseract installation paths
-            possible_paths = [
-                r'C:\Program Files\Tesseract-OCR\tesseract.exe',
-                r'C:\Program Files (x86)\Tesseract-OCR\tesseract.exe',
-                os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Tesseract-OCR', 'tesseract.exe'),
-                os.path.expanduser('~/.local/bin/tesseract'),  # Linux/macOS
-                '/usr/local/bin/tesseract',  # Linux/macOS
-                '/usr/bin/tesseract'  # Linux/macOS
-            ]
-
-            # Try to find Tesseract executable
-            tesseract_path = None
-            for path in possible_paths:
-                if os.path.exists(path):
-                    tesseract_path = path
-                    break
-
-            # If not found in standard locations, try which/where command
-            if not tesseract_path:
-                import subprocess
-                try:
-                    # Windows
-                    result = subprocess.run(['where', 'tesseract'], capture_output=True, text=True)
-                    if result.returncode == 0:
-                        tesseract_path = result.stdout.strip().split('\n')[0]
-                except:
-                    try:
-                        # Unix-like systems
-                        result = subprocess.run(['which', 'tesseract'], capture_output=True, text=True)
-                        if result.returncode == 0:
-                            tesseract_path = result.stdout.strip()
-                    except:
-                        pass
-
-            # If Tesseract path is found
-            if tesseract_path:
-                print(f"Tesseract found at: {tesseract_path}")
-                
-                # Set Tesseract executable path
-                pytesseract.pytesseract.tesseract_cmd = tesseract_path
-                
-                # Determine tessdata directory
-                tessdata_dir = os.path.join(os.path.dirname(tesseract_path), 'tessdata')
-                
-                # If tessdata directory doesn't exist, try some alternatives
-                if not os.path.exists(tessdata_dir):
-                    # Try application's bundled tessdata
-                    app_tessdata = os.path.join(os.path.dirname(__file__), 'tessdata')
-                    if os.path.exists(app_tessdata):
-                        tessdata_dir = app_tessdata
-                
-                # Set TESSDATA_PREFIX
-                os.environ['TESSDATA_PREFIX'] = tessdata_dir
-                print(f"Tessdata directory set to: {tessdata_dir}")
-                
-                return True
+            # Use the constants already defined at module level
+            tesseract_cmd = TESSERACT_CMD
+            tessdata_dir = TESSDATA_PREFIX
             
-            # If no Tesseract found
-            print("Tesseract not found. Attempting to download.")
-            return self.download_tesseract_components()
-        
+            # Check if the predefined paths exist
+            if os.path.exists(tesseract_cmd):
+                # Set Tesseract executable path
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+                
+                # Set tessdata directory in environment
+                os.environ['TESSDATA_PREFIX'] = tessdata_dir
+                
+                print(f"Using Tesseract at: {tesseract_cmd}")
+                print(f"Using tessdata directory: {tessdata_dir}")
+                
+                # Quick verification
+                try:
+                    version = pytesseract.get_tesseract_version()
+                    print(f"Tesseract version: {version}")
+                    return True
+                except Exception as e:
+                    print(f"Error verifying Tesseract: {e}")
+            else:
+                print(f"Predefined Tesseract path not found: {tesseract_cmd}")
+                messagebox.showwarning("Tesseract Not Found", 
+                                    f"Tesseract OCR not found at {tesseract_cmd}.\n" +
+                                    "OCR functionality will not work.")
+            
+            return False
+            
         except Exception as e:
             print(f"Error initializing Tesseract: {e}")
             return False
@@ -1820,7 +1744,7 @@ class ScreenOCR:
                 height = scaled_y2 - scaled_y1
                 
                 # Validate capture area
-                if width < 50 and height < 50:
+                if width < 50 or height < 50:
                     messagebox.showwarning("Invalid Selection", 
                         "Selected area is too small. Please select a larger area (minimum 50 pixels width and height).")
                     return
