@@ -20,7 +20,6 @@ import logging
 TESSDATA_PREFIX = r'C:\Program Files\Tesseract-OCR\tessdata'
 TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Update on every published Version
 # Read version from file
 try:
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt"), "r") as f:
@@ -98,7 +97,28 @@ class CaptureConfig:
         except Exception as e:
             # Fallback to print if logger fails
             print(f"Logging failed: {e}. Original message: {message}")
-    
+
+    def get_version():
+        try:
+            # Determine base path for resources
+            if getattr(sys, 'frozen', False):
+                # If running as executable
+                base_path = os.path.dirname(sys.executable)
+            else:
+                # If running as script
+                base_path = os.path.dirname(os.path.abspath(__file__))
+            
+            # Path to version file
+            version_path = os.path.join(base_path, "version.txt")
+            
+            with open(version_path, "r") as f:
+                return f"{f.read().strip()} {datetime.now().strftime('%d/%m/%Y')}"
+        except Exception as e:
+            print(f"Error reading version: {str(e)}")
+            return "unknown version"
+
+    VERSION = get_version()
+
     def set_interval_change_callback(self, callback):
         """Set a callback to be called when the interval changes"""
         self.on_interval_change = callback
