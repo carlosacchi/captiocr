@@ -475,11 +475,46 @@ class ScreenOCR:
                 tessdata_dir = TESSDATA_PREFIX
                 os.environ['TESSDATA_PREFIX'] = tessdata_dir
                 
-                # Quick verification
+                # Quick verification using pytesseract's internal methods directly
+                # This avoids spawning a visible command window
                 try:
-                    version = pytesseract.get_tesseract_version()
-                    print(f"Tesseract version: {version}")
-                    return True
+                    # Use a more silent method to verify installation
+                    # We'll directly access the version through pytesseract's internal methods
+                    # This avoids creating a console window for the subprocess
+                    from pytesseract.pytesseract import run_tesseract, TesseractError
+                    
+                    # Check if the version file exists in the tessdata directory
+                    if os.path.isdir(tessdata_dir) and os.path.isfile(os.path.join(tessdata_dir, "eng.traineddata")):
+                        version_info = "Tesseract available (verified tessdata)"
+                        print(f"Tesseract verification: {version_info}")
+                        return True
+                    
+                    # If we couldn't verify through the file check, use a minimal run_tesseract call
+                    # with subprocess creation flags to hide the window
+                    try:
+                        import subprocess
+                        startupinfo = None
+                        if hasattr(subprocess, 'STARTUPINFO'):  # Windows only
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = 0  # SW_HIDE
+                        
+                        # Run a simple version check with hidden window
+                        result = subprocess.run(
+                            [tesseract_cmd, "--version"],
+                            capture_output=True,
+                            text=True,
+                            startupinfo=startupinfo
+                        )
+                        
+                        if result.returncode == 0:
+                            version_info = result.stdout.strip().split("\n")[0] if result.stdout else "Unknown version"
+                            print(f"Tesseract version: {version_info}")
+                            return True
+                        else:
+                            print(f"Tesseract check failed with return code: {result.returncode}")
+                    except Exception as sub_e:
+                        print(f"Error running direct tesseract check: {sub_e}")
                 except Exception as e:
                     print(f"Error verifying Tesseract (will attempt installation): {e}")
             else:
@@ -492,9 +527,32 @@ class ScreenOCR:
                 # Verify installation after install
                 try:
                     pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-                    version = pytesseract.get_tesseract_version()
-                    print(f"Tesseract version after installation: {version}")
-                    return True
+                    
+                    # Use the same silent method as above to verify post-installation
+                    import subprocess
+                    startupinfo = None
+                    if hasattr(subprocess, 'STARTUPINFO'):  # Windows only
+                        startupinfo = subprocess.STARTUPINFO()
+                        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                        startupinfo.wShowWindow = 0  # SW_HIDE
+                    
+                    # Run a simple version check with hidden window
+                    result = subprocess.run(
+                        [TESSERACT_CMD, "--version"],
+                        capture_output=True,
+                        text=True,
+                        startupinfo=startupinfo
+                    )
+                    
+                    if result.returncode == 0:
+                        version_info = result.stdout.strip().split("\n")[0] if result.stdout else "Unknown version"
+                        print(f"Tesseract version after installation: {version_info}")
+                        return True
+                    else:
+                        print(f"Tesseract check failed after installation with return code: {result.returncode}")
+                        messagebox.showerror("Tesseract Error", 
+                                            "Tesseract was installed but could not be verified. OCR may not work correctly.")
+                        return False
                 except Exception as e:
                     print(f"Error verifying Tesseract after installation: {e}")
                     messagebox.showerror("Tesseract Error", 
@@ -606,7 +664,14 @@ class ScreenOCR:
         status_frame.grid(row=row, column=0, pady=5, sticky=tk.N)
         row += 1    # Increment row
 
-        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, background='#f0f0f0')
+        # Modified status label with wrapping capability - use a wider width and wraplength
+        self.status_label = ttk.Label(
+            status_frame, 
+            textvariable=self.status_var,
+            background='#f0f0f0',
+            wraplength=220,  # Set wrap length to fit in window
+            justify='center'  # Center-align multi-line text
+        )
         self.status_label.pack()
         
         print("Adding caption display area...")
@@ -615,10 +680,16 @@ class ScreenOCR:
         caption_frame.grid(row=row, column=0, pady=8, sticky=(tk.W, tk.E))
         row += 1    # Increment row
 
-        # Text display area for captured text (could be added here)
-        captured_text_display = ttk.Label(caption_frame, text="Captured text will appear here", 
-                                        background='#f0f0f0', foreground='#888888')
-        captured_text_display.pack(pady=5)
+        # Store a reference to the captured text display label
+        self.captured_text_display = ttk.Label(
+            caption_frame, 
+            text="Captured text will appear here", 
+            background='#f0f0f0', 
+            foreground='#888888',
+            wraplength=200,  # Set wrap length to fit in frame
+            justify='left'   # Left-align text for better readability
+        )
+        self.captured_text_display.pack(pady=5, fill=tk.X, expand=True)
 
         # Add a simple status bar at the bottom of the window
         self.statusbar = ttk.Frame(self.root, style='Transparent.TFrame')
@@ -2298,6 +2369,26 @@ class ScreenOCR:
         
         return text
     
+    def update_capture_text(self, text):
+        """Update the captured text display with the most recent OCR text, limiting length to prevent UI distortion"""
+        if hasattr(self, 'captured_text_display') and self.captured_text_display:
+            # Limit the number of characters to display
+            max_chars = 50
+            
+            # Maw rows to display
+            lines = text.split('\n')
+            if len(lines) > 2:  # Up to 2 lines
+                text = '\n'.join(lines[:2]) + "..."
+            
+            # Also limit the number of characters
+            if len(text) > max_chars:
+                display_text = text[:max_chars] + "..."
+            else:
+                display_text = text
+            
+            # Add UI update to main thread
+            self.root.after(0, lambda: self.captured_text_display.config(text=display_text))
+
     def capture_screen(self):
         """Capture screen content and perform OCR, with thread-safe UI handling"""
         try:
@@ -2336,7 +2427,7 @@ class ScreenOCR:
                 control_frame.pack(fill=tk.X, side=tk.TOP, pady=0)
                 
                 # Status label
-                self.status_label = tk.Label(control_frame, text="Capturing... (Click and drag to move)", 
+                self.status_label = tk.Label(control_frame, text="Capturing...\n(Click and drag to move)", 
                                     bg='blue', fg='white', font=('Arial', 10))
                 self.status_label.pack(side=tk.LEFT, padx=10)
                 
@@ -2539,17 +2630,11 @@ class ScreenOCR:
                         last_text = text
                         
                         # Thread-safe update of UI text
-                        if len(text) > 90:
-                            first_line = text[:30]
-                            second_line = text[30:60]
-                            third_line = text[60:90]
-                            status_text = f"Last capture:\n{first_line}\n{second_line}\n{third_line}..."
-                        else:
-                            first_line = text[:min(30, len(text))]
-                            second_line = text[30:min(60, len(text))]
-                            third_line = text[60:min(90, len(text))]
-                            status_text = f"Last capture:\n{first_line}\n{second_line}\n{third_line}"
+                        status_text = "Capturing text...\n(Press Ctrl+Q or STOP to stop)"
                         self.root.after(0, lambda: self.status_var.set(status_text))
+                        
+                        # Update the captured text display with the full text instead
+                        self.root.after(0, lambda t=text: self.update_capture_text(t))
                         
                         # Thread-safe update of label
                         def update_label():
