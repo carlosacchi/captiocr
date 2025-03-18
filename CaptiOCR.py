@@ -2090,9 +2090,9 @@ class ScreenOCR:
                 height = scaled_y2 - scaled_y1
                 
                 # Validate capture area
-                if width < 50 or height < 50:
+                if width < 100 or height < 100:
                     messagebox.showwarning("Invalid Selection", 
-                        "Selected area is too small. Please select a larger area (minimum 50 pixels width and height).")
+                        "Selected area is too small. Please select a larger area (minimum 100 pixels width and height).")
                     return
                 
                 # Store the scaled coordinates
