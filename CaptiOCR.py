@@ -20,14 +20,22 @@ import logging
 TESSDATA_PREFIX = r'C:\Program Files\Tesseract-OCR\tessdata'
 TESSERACT_CMD = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
-# Read version from file
+# Read version & date from file
 try:
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt"), "r") as f:
-        VERSION = f"{f.read().strip()} {datetime.now().strftime('%d/%m/%Y')}"
+        version_content = f.readlines()
+        if len(version_content) >= 2:
+            version_number = version_content[0].strip()
+            version_date = version_content[1].strip()
+            VERSION = f"{version_number} {version_date}"
+        else:
+            # Fallback if file doesn't contain two lines
+            VERSION = f"{version_content[0].strip()}"
 except Exception as e:
     print(f"Error reading version: {str(e)}")
     VERSION = "unknown version"
-
+        
+# Standard icon path
 def set_window_icon(root):
     """Set the application window icon from the standard resources directory"""
     try:
@@ -37,26 +45,44 @@ def set_window_icon(root):
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
         
-        # Standard icon path
+        # Try to find the window icon first (16x16 for title bar)
+        icon16_path = os.path.join(base_path, 'resources', 'icon16.ico')
+        
+        # Then try the standard icon as fallback
         icon_path = os.path.join(base_path, 'resources', 'icon.ico')
         
-        print(f"Looking for icon at: {icon_path}")
+        print(f"Looking for window icon at: {icon16_path}")
+        print(f"Looking for application icon at: {icon_path}")
         
-        if os.path.exists(icon_path):
+        # First try to set the window icon (title bar)
+        if os.path.exists(icon16_path):
+            root.iconbitmap(icon16_path)
+            print(f"Window icon set from: {icon16_path}")
+        elif os.path.exists(icon_path):
+            # Fall back to regular icon if icon16 doesn't exist
             root.iconbitmap(icon_path)
-            print(f"Icon set from: {icon_path}")
-            return True
+            print(f"Window icon set from regular icon: {icon_path}")
         else:
-            print(f"Icon not found at: {icon_path}")
+            print(f"No suitable icon found for window title bar")
             
-            # Crea un'icona fallback semplice
+            # Create a fallback icon
             canvas = tk.Canvas(width=16, height=16)
             canvas.create_rectangle(0, 0, 16, 16, fill="#4CAF50", outline="")
             fallback_icon = tk.PhotoImage(canvas.postscript(colormode='color'))
             root.iconphoto(True, fallback_icon)
-            root._icon = fallback_icon  # Mantieni un riferimento per evitare il garbage collection
+            root._icon = fallback_icon  # Keep a reference to prevent garbage collection
             print("Created fallback icon")
-            return True
+        
+        # Additionally, set the application icon for taskbar, etc.
+        # This is important for proper Windows integration
+        if os.path.exists(icon_path):
+            # Use iconphoto for the application icon (taskbar, alt+tab)
+            app_icon = tk.PhotoImage(file=icon_path)
+            root.iconphoto(True, app_icon)
+            root._app_icon = app_icon  # Keep a reference
+            print(f"Application icon set from: {icon_path}")
+        
+        return True
     except Exception as e:
         print(f"Error setting icon: {e}")
         return False
@@ -223,6 +249,18 @@ class CaptureConfig:
         # Set max similar captures
         self.set_max_similar_captures(similar_captures)
 
+    def set_max_similar_captures(self, count):
+        """Set the number of similar captures before increasing interval"""
+        if count is None:
+            return
+            
+        old_count = self.max_similar_captures
+        self.max_similar_captures = max(1, int(count))
+        
+        if old_count != self.max_similar_captures:
+            # Log changes to similar captures threshold
+            self._log(f"Max similar captures changed from {old_count} to {self.max_similar_captures}")
+
 class ScreenOCR:
     def __init__(self):
         print("Starting application...")
@@ -261,6 +299,10 @@ class ScreenOCR:
         
         # Initialize Tesseract with custom tessdata if available
         self.language_manager = LanguageManager(self.config_dir)
+
+        # Check Tesseract Installation
+        print("Checking Tesseract OCR installation...")
+        self.check_tesseract_at_startup()
         
         # Track the most recently processed file
         self.last_processed_file = None
@@ -415,7 +457,62 @@ class ScreenOCR:
         except Exception as e:
             print(f"Critical error in detect_dpi_scaling: {str(e)}")
             return 1.0  # Default to no scaling
-        
+
+    def check_tesseract_at_startup(self):
+        """Check for Tesseract installation at application startup and install if needed"""
+        try:
+            print("Checking Tesseract installation...")
+            tesseract_cmd = TESSERACT_CMD
+            
+            # First check if Tesseract is already installed
+            if os.path.exists(tesseract_cmd):
+                print(f"Tesseract found at: {tesseract_cmd}")
+                
+                # Set Tesseract executable path
+                pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+                
+                # Set tessdata directory in environment
+                tessdata_dir = TESSDATA_PREFIX
+                os.environ['TESSDATA_PREFIX'] = tessdata_dir
+                
+                # Quick verification
+                try:
+                    version = pytesseract.get_tesseract_version()
+                    print(f"Tesseract version: {version}")
+                    return True
+                except Exception as e:
+                    print(f"Error verifying Tesseract (will attempt installation): {e}")
+            else:
+                print(f"Tesseract not found at: {tesseract_cmd}")
+            
+            # If we reach here, we need to install or repair Tesseract
+            if self.install_tesseract():
+                print("Tesseract was successfully installed")
+                
+                # Verify installation after install
+                try:
+                    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+                    version = pytesseract.get_tesseract_version()
+                    print(f"Tesseract version after installation: {version}")
+                    return True
+                except Exception as e:
+                    print(f"Error verifying Tesseract after installation: {e}")
+                    messagebox.showerror("Tesseract Error", 
+                                        "Tesseract was installed but could not be verified. OCR may not work correctly.")
+                    return False
+            else:
+                print("Tesseract installation failed or was cancelled")
+                messagebox.showwarning("Tesseract Not Installed", 
+                                    "Tesseract OCR is required for this application but was not installed.\n" +
+                                    "The application will run, but OCR functionality will not work.")
+                return False
+                
+        except Exception as e:
+            print(f"Error checking Tesseract at startup: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
     def setup_logging(self):
         """Set up a logging system to redirect prints to a log file"""
         try:
@@ -430,9 +527,20 @@ class ScreenOCR:
     def setup_ui(self):
         print("Creating main frame...")
 
+        # Set the main window transparency
+        self.root.attributes('-alpha', 0.92)  # Set window transparency to 92% opacity
+
+        # Create a style for ttk widgets
+        self.style = ttk.Style()
+        self.style.configure('Transparent.TFrame', background='#f0f0f0')
+        self.style.configure('Transparent.TLabelframe', background='#f0f0f0')
+        self.style.configure('Transparent.TLabelframe.Label', background='#f0f0f0')
+        
         # Set up the menu bar first
         self.setup_menu()
-        frame = ttk.Frame(self.root, padding="10")
+        
+        # Create main frame with custom style
+        frame = ttk.Frame(self.root, padding="10", style='Transparent.TFrame')
         frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
         # Set up rows
@@ -442,23 +550,24 @@ class ScreenOCR:
         frame.columnconfigure(0, weight=1)  # This allows the column to expand
         
         print("Adding title...")
-        # Title
-        title = ttk.Label(frame, text="CaptiOCR", font=("Arial", 20))
+        # Title with custom background and styling
+        title = ttk.Label(frame, text="CaptiOCR", font=("Arial", 20, "bold"), background='#f0f0f0')
         title.grid(row=row, column=0, pady=5, sticky=tk.N)
-        row += 1	# Increment row
+        row += 1    # Increment row
 
         print("Version " + VERSION)
         # Version
-        version = ttk.Label(frame, text="Version {}".format(VERSION), font=("Arial", 8))
+        version = ttk.Label(frame, text="Version {}".format(VERSION), font=("Arial", 8), background='#f0f0f0')
         version.grid(row=row, column=0, pady=5, sticky=tk.N)
-        row += 1	# Increment row
+        row += 1    # Increment row
         
         print("Adding language selection...")
-        # Language selection
-        lang_frame = ttk.LabelFrame(frame, text="Select Language", padding="10")
+        # Language selection with transparent style
+        lang_frame = ttk.LabelFrame(frame, text="Select Language", padding="10", style='Transparent.TLabelframe')
         lang_frame.grid(row=row, column=0, pady=5, sticky=tk.N)
-        row += 1	# Increment row
+        row += 1    # Increment row
 
+        # Custom combobox with better appearance
         combo = ttk.Combobox(lang_frame, textvariable=self.selected_lang, width=20)
         combo['values'] = [lang[0] for lang in self.languages]
         combo.current(0)
@@ -466,60 +575,70 @@ class ScreenOCR:
 
         combo.bind("<<ComboboxSelected>>", self.check_selected_language)
 
-        button_frame = ttk.Frame(frame)
+        button_frame = ttk.Frame(frame, style='Transparent.TFrame')
         button_frame.grid(row=row, column=0, pady=5, sticky=tk.N)
-        row += 1	# Increment row
+        row += 1    # Increment row
 
         print("Adding start button...")
-        # Start button
+        # Start button with hover effect
         self.start_button = tk.Button(
             button_frame,
             text="Start (Select Area)",
             command=self.start_capture,
             bg="#4CAF50",  # Green background
             fg="white",
-            font=("Arial", 11),
+            font=("Arial", 11, "bold"),
             relief=tk.FLAT,
-            padx=10,
-            pady=5,
+            padx=12,
+            pady=6,
             bd=0,
-            activebackground="#0b7dda",
-            cursor="hand2"
+            activebackground="#45a049",  # Darker green on hover
+            cursor="hand2",
+            highlightthickness=0  # Remove highlight border
         )
-        self.start_button.grid(row=row, column=0, pady=5, sticky=tk.N)
-        row += 1	# Increment row
+
+        self.start_button.grid(row=row, column=0, pady=8, sticky=tk.N)
+        row += 1    # Increment row
         
         print("Adding status label...")
-        # Status - centered
-        status_frame = ttk.Frame(frame)
+        # Status - centered with transparent background
+        status_frame = ttk.Frame(frame, style='Transparent.TFrame')
         status_frame.grid(row=row, column=0, pady=5, sticky=tk.N)
-        row += 1	# Increment row
+        row += 1    # Increment row
 
-        self.status_label = ttk.Label(status_frame, textvariable=self.status_var)
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, background='#f0f0f0')
         self.status_label.pack()
         
         print("Adding caption display area...")
-        # Caption display area
-        caption_frame = ttk.LabelFrame(frame, text="Captured Text", padding="5")
-        caption_frame.grid(row=row, column=0, pady=5, sticky=(tk.W, tk.E))
-        row += 1	# Increment row
+        # Caption display area with improved styling
+        caption_frame = ttk.LabelFrame(frame, text="Captured Text", padding="10", style='Transparent.TLabelframe')
+        caption_frame.grid(row=row, column=0, pady=8, sticky=(tk.W, tk.E))
+        row += 1    # Increment row
+
+        # Text display area for captured text (could be added here)
+        captured_text_display = ttk.Label(caption_frame, text="Captured text will appear here", 
+                                        background='#f0f0f0', foreground='#888888')
+        captured_text_display.pack(pady=5)
 
         # Add a simple status bar at the bottom of the window
-        self.statusbar = ttk.Frame(self.root)
+        self.statusbar = ttk.Frame(self.root, style='Transparent.TFrame')
         self.statusbar.grid(row=999, column=0, sticky=(tk.W, tk.E))
 
-        # Create interval status label
+        # Create interval status label with color highlight
         self.interval_status_var = tk.StringVar(value="Interval: --")
-        self.interval_status = ttk.Label(self.statusbar, textvariable=self.interval_status_var)
+        self.interval_status = ttk.Label(
+            self.statusbar, 
+            textvariable=self.interval_status_var,
+            background='#f0f0f0', 
+            foreground='#555555'
+        )
         self.interval_status.pack(side=tk.LEFT, padx=5, pady=2)
 
         # Configure grid
         frame.rowconfigure(tuple(range(10)), weight=1)  # Make all rows expandable
         self.root.columnconfigure(0, weight=1)  # Make the root column expandable
         self.root.rowconfigure(0, weight=1)  # Make the root row expandable
-
-
-
+        
         print("UI setup complete.")
 
     def setup_menu(self):
@@ -565,7 +684,10 @@ class ScreenOCR:
         print("Menu bar setup complete")
 
     def initialize_tesseract(self):
-        """Initialize Tesseract using predefined constants"""
+        """
+        Initialize Tesseract for OCR operations.
+        Uses the installation verified at startup.
+        """
         try:
             # Use the constants already defined at module level
             tesseract_cmd = TESSERACT_CMD
@@ -591,9 +713,9 @@ class ScreenOCR:
                     print(f"Error verifying Tesseract: {e}")
             else:
                 print(f"Predefined Tesseract path not found: {tesseract_cmd}")
-                messagebox.showwarning("Tesseract Not Found", 
-                                    f"Tesseract OCR not found at {tesseract_cmd}.\n" +
-                                    "OCR functionality will not work.")
+                messagebox.showerror("Tesseract Error", 
+                                "Tesseract OCR is not available. OCR functionality will not work.\n" +
+                                "Please restart the application to try installing Tesseract again.")
             
             return False
             
@@ -669,7 +791,211 @@ class ScreenOCR:
         else:
             print(f"Warning: Icon file not found at {icon_path}")
             return None
-    
+
+    def install_tesseract(self):
+        """
+        Downloads and installs Tesseract OCR when not found on the system.
+        Returns True if installation is successful, False otherwise.
+        """
+        try:
+            import os
+            import platform
+            import tempfile
+            import subprocess
+            import shutil
+            import urllib.request
+            import ctypes
+            from tkinter import messagebox, Toplevel, Label, ttk
+            
+            # Check if we're on Windows (the function only supports Windows for now)
+            if platform.system() != "Windows":
+                messagebox.showerror("Unsupported Platform", 
+                                    "Automatic Tesseract installation is only supported on Windows. " +
+                                    "Please install Tesseract manually.")
+                return False
+            
+            # Ask user for confirmation
+            if not messagebox.askyesno("Install Tesseract", 
+                                    "Tesseract OCR is required but not found. " +
+                                    "Would you like to download and install it now?"):
+                return False
+            
+            # Create progress window
+            progress_window = Toplevel(self.root)
+            progress_window.title("Installing Tesseract OCR")
+            progress_window.geometry("400x150")
+            progress_window.transient(self.root)
+            progress_window.grab_set()
+            
+            status_label = Label(progress_window, text="Preparing to download Tesseract...", wraplength=380)
+            status_label.pack(pady=10)
+            
+            progress_bar = ttk.Progressbar(progress_window, length=350, mode='indeterminate')
+            progress_bar.pack(pady=10)
+            progress_bar.start()
+            
+            detail_label = Label(progress_window, text="", wraplength=380)
+            detail_label.pack(pady=5)
+            
+            # Force window update
+            progress_window.update()
+            
+            # Create temp directory
+            temp_dir = tempfile.mkdtemp(prefix="tesseract_install_")
+            installer_path = os.path.join(temp_dir, "tesseract-installer.exe")
+            
+            # Current verified working URL for Tesseract installer
+            tesseract_url = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+            
+            status_label.config(text="Downloading Tesseract installer...")
+            detail_label.config(text=f"From: {tesseract_url}")
+            progress_window.update()
+            
+            # Download the installer
+            try:
+                urllib.request.urlretrieve(tesseract_url, installer_path)
+            except Exception as e:
+                status_label.config(text=f"Download failed: {str(e)}")
+                progress_window.update()
+                progress_window.after(3000, progress_window.destroy)
+                return False
+            
+            # Check if download was successful
+            if not os.path.exists(installer_path) or os.path.getsize(installer_path) < 1000000:
+                status_label.config(text="Download failed or file is incomplete")
+                progress_window.update()
+                progress_window.after(3000, progress_window.destroy)
+                return False
+            
+            # Run installer
+            status_label.config(text="Running Tesseract installer...\nPlease complete the installation wizard.")
+            detail_label.config(text="The installer window will open. Follow the steps to install Tesseract.")
+            progress_window.update()
+            
+            # Check if we need admin rights
+            def is_admin():
+                try:
+                    return ctypes.windll.shell32.IsUserAnAdmin()
+                except:
+                    return False
+            
+            # Install command - silent install with basic options
+            install_cmd = [
+                installer_path,
+                "/SILENT",  # Silent install but with progress bar
+                "/NORESTART",  # Don't restart computer
+                f"/DIR=C:\\Program Files\\Tesseract-OCR"  # Installation directory
+            ]
+            
+            try:
+                # If we're not admin, use ShellExecute to trigger UAC
+                if not is_admin():
+                    status_label.config(text="Requesting administrator privileges...")
+                    progress_window.update()
+                    
+                    ctypes.windll.shell32.ShellExecuteW(
+                        None, "runas", installer_path, " ".join(install_cmd[1:]), None, 1)
+                else:
+                    # If we are admin, run directly
+                    subprocess.run(install_cmd, check=True)
+                    
+                status_label.config(text="Waiting for installation to complete...")
+                progress_window.update()
+                
+                # Wait for Tesseract installation to be completed
+                # Simple way: wait for tesseract.exe to appear
+                max_wait = 120  # seconds
+                interval = 1  # check every second
+                
+                tesseract_exe = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+                
+                for i in range(max_wait):
+                    progress_window.update()
+                    if os.path.exists(tesseract_exe):
+                        # Wait a bit more to ensure installation is fully complete
+                        progress_window.after(3000)
+                        break
+                        
+                    detail_label.config(text=f"Waiting for installation: {i+1}/{max_wait} seconds")
+                    progress_window.update()
+                    progress_window.after(interval * 1000)
+                
+                # Verify installation more thoroughly
+                if os.path.exists(tesseract_exe):
+                    # Check if tessdata directory exists with at least eng.traineddata
+                    tessdata_dir = r"C:\Program Files\Tesseract-OCR\tessdata"
+                    eng_traineddata = os.path.join(tessdata_dir, "eng.traineddata")
+                    
+                    if not os.path.exists(tessdata_dir) or not os.path.exists(eng_traineddata):
+                        status_label.config(text="Installation incomplete")
+                        detail_label.config(text="Tessdata directory or English language file not found.")
+                        progress_window.update()
+                        progress_window.after(3000, progress_window.destroy)
+                        return False
+                    
+                    # Try to run a quick test with the installed Tesseract
+                    try:
+                        test_result = subprocess.run([tesseract_exe, "--version"], 
+                                                capture_output=True, text=True, timeout=5)
+                        if test_result.returncode != 0:
+                            status_label.config(text="Installation verification failed")
+                            detail_label.config(text=f"Tesseract executable didn't run correctly: {test_result.stderr}")
+                            progress_window.update()
+                            progress_window.after(3000, progress_window.destroy)
+                            return False
+                    except Exception as test_error:
+                        status_label.config(text="Installation verification failed")
+                        detail_label.config(text=f"Error testing Tesseract: {str(test_error)}")
+                        progress_window.update()
+                        progress_window.after(3000, progress_window.destroy)
+                        return False
+                    
+                    # Set global variables
+                    global TESSERACT_CMD, TESSDATA_PREFIX
+                    TESSERACT_CMD = tesseract_exe
+                    TESSDATA_PREFIX = tessdata_dir
+                    
+                    # Update UI
+                    status_label.config(text="Tesseract installed successfully!")
+                    detail_label.config(text="You can now use CaptiOCR.")
+                    progress_bar.stop()
+                    progress_window.update()
+                    progress_window.after(3000, progress_window.destroy)
+                    
+                    # Set environment variables for this session
+                    os.environ['TESSDATA_PREFIX'] = TESSDATA_PREFIX
+                    
+                    # Initialize pytesseract with new path
+                    import pytesseract
+                    pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
+                    
+                    return True
+                else:
+                    status_label.config(text="Installation may have failed")
+                    detail_label.config(text="Tesseract executable not found after installation.")
+                    progress_window.update()
+                    progress_window.after(3000, progress_window.destroy)
+                    return False
+                    
+            except Exception as e:
+                status_label.config(text=f"Error during installation: {str(e)}")
+                progress_window.update()
+                progress_window.after(3000, progress_window.destroy)
+                return False
+            finally:
+                # Clean up
+                try:
+                    shutil.rmtree(temp_dir)
+                except:
+                    pass
+                    
+        except Exception as e:
+            print(f"Error in install_tesseract: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            messagebox.showerror("Installation Error", f"Failed to install Tesseract: {str(e)}")
+            return False
+          
     def download_tesseract_components(self):
         """Download necessary Tesseract components"""
         try:
@@ -1971,18 +2297,6 @@ class ScreenOCR:
         text = re.sub(r'\s+', ' ', text).strip()
         
         return text
-    
-    def set_max_similar_captures(self, count):
-        """Set the number of similar captures before increasing interval"""
-        if count is None:
-            return
-            
-        old_count = self.max_similar_captures
-        self.max_similar_captures = max(1, int(count))
-        
-        if old_count != self.max_similar_captures:
-            # Log changes to similar captures threshold
-            self._log(f"Max similar captures changed from {old_count} to {self.max_similar_captures}")
     
     def capture_screen(self):
         """Capture screen content and perform OCR, with thread-safe UI handling"""
