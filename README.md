@@ -1,5 +1,7 @@
 # 🖥️ CaptiOCR - Real-Time Screen Text Extraction
 
+[![CodeQL](https://github.com/carlosacchi/captiocr/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/carlosacchi/captiocr/actions/workflows/github-code-scanning/codeql)
+
 **CaptiOCR** is an open-source **real-time screen text extraction tool** that allows users to capture on-screen text dynamically using **Tesseract OCR**. With an easy-to-use interface, you can **select an area of the screen** and extract text **continuously**, making it ideal for live captions, subtitles, or instant text recognition.
 
 🚀 **Planned future enhancements** include:
