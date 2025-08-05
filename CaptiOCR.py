@@ -44,5 +44,5 @@ except Exception as e:
     print(f"\n❌ ERRORE: {e}")
     import traceback
     traceback.print_exc()
-
-input("\n\nPremi ENTER per chiudere...")
+    
+    # Note: input() removed for exe compatibility
