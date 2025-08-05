@@ -1,2 +1,5 @@
-v0.8.11-alpha
-18/03/2025
+0.9.43-alpha
+05/08/2025
+CaptiOCR
+Author: Carlo Sacchi
+Website: https://www.captiocr.com
