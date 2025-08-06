@@ -1,48 +1,49 @@
 #!/usr/bin/env python
-
 """
-CaptiOCR - Debug version
+CaptiOCR - Main entry point
 """
 import sys
 import os
 
-print("=== CAPTIOCR DEBUG ===")
-print(f"Python version: {sys.version}")
-print(f"Current directory: {os.getcwd()}")
-print(f"Script location: {os.path.abspath(__file__)}")
-print(f"Script directory: {os.path.dirname(os.path.abspath(__file__))}")
+def main():
+    """Main entry point for CaptiOCR."""
+    try:
+        # Ensure the captiocr module can be found
+        if hasattr(sys, '_MEIPASS'):
+            # Running in PyInstaller bundle
+            base_path = sys._MEIPASS
+        else:
+            # Running in development
+            base_path = os.path.dirname(os.path.abspath(__file__))
+        
+        # Add base path to sys.path if not already there
+        if base_path not in sys.path:
+            sys.path.insert(0, base_path)
+        
+        # Import and run the main application
+        from captiocr.main import main as app_main
+        app_main()
+        
+    except Exception as e:
+        # Show error dialog
+        try:
+            import tkinter as tk
+            from tkinter import messagebox
+            
+            root = tk.Tk()
+            root.withdraw()
+            messagebox.showerror(
+                "CaptiOCR Error",
+                f"Failed to start CaptiOCR:\n\n{str(e)}"
+            )
+            root.destroy()
+        except:
+            # If dialog fails, create error file
+            try:
+                with open("captiocr_error.txt", "w") as f:
+                    f.write(f"CaptiOCR Error: {str(e)}")
+            except:
+                pass
 
-# Controlla se la cartella captiocr esiste
-captiocr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "captiocr")
-print(f"\nCercando captiocr in: {captiocr_path}")
-print(f"La cartella captiocr esiste? {os.path.exists(captiocr_path)}")
-
-if os.path.exists(captiocr_path):
-    print(f"Contenuto di captiocr: {os.listdir(captiocr_path)}")
-    
-    # Controlla se main.py esiste
-    main_path = os.path.join(captiocr_path, "main.py")
-    print(f"main.py esiste? {os.path.exists(main_path)}")
-
-# Aggiungi al path
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-print(f"\nPython path: {sys.path[0]}")
-
-try:
-    print("\nProvando ad importare captiocr...")
-    import captiocr
-    print("✓ captiocr importato con successo")
-    
-    print("\nProvando ad importare captiocr.main...")
-    from captiocr.main import main
-    print("✓ captiocr.main importato con successo")
-    
-    print("\nProvando ad eseguire main()...")
+if __name__ == "__main__":
     main()
-    
-except Exception as e:
-    print(f"\n❌ ERRORE: {e}")
-    import traceback
-    traceback.print_exc()
-    
-    # Note: input() removed for exe compatibility

@@ -1,4 +1,4 @@
-0.9.44-alpha
+0.9.61-alpha
 05/08/2025
 CaptiOCR
 Author: Carlo Sacchi
