@@ -1,0 +1,72 @@
+# -*- mode: python ; coding: utf-8 -*-
+
+block_cipher = None
+
+a = Analysis(
+    ['CaptiOCR.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=[
+        ('captiocr', 'captiocr'),
+        ('version.txt', '.'),
+        ('dist/resources', 'resources'),
+    ],
+    hiddenimports=[
+        'captiocr',
+        'captiocr.main',
+        'captiocr.ui',
+        'captiocr.ui.main_window',
+        'captiocr.core',
+        'captiocr.core.capture',
+        'captiocr.core.ocr',
+        'captiocr.core.text_processor',
+        'captiocr.config',
+        'captiocr.config.settings',
+        'captiocr.config.constants',
+        'captiocr.config.app_info',
+        'captiocr.models',
+        'captiocr.models.capture_config',
+        'captiocr.utils',
+        'captiocr.utils.file_manager',
+        'captiocr.utils.language_manager',
+        'captiocr.utils.logger',
+        'captiocr.ui.base_window',
+        'captiocr.ui.capture_window',
+        'captiocr.ui.selection_window',
+        'captiocr.ui.dialogs',
+        'captiocr.ui.dialog_base',
+    ],
+    hookspath=[],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=block_cipher,
+    noarchive=False,
+)
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    [],
+    name='CaptiOCR',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='icon.ico',
+)
