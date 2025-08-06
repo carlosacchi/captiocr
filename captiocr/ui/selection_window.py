@@ -233,14 +233,20 @@ class SelectionWindow(BaseWindow):
         # Debug
         print(f"Raw selection (logical pixels): {x1}, {y1}, {x2}, {y2}")
         print(f"Scale factor: {sf}")
+        print(f"Logical size: {x2-x1}×{y2-y1} pixels")
+        print(f"Physical size: {int((x2-x1)*sf)}×{int((y2-y1)*sf)} pixels")
 
-        # Validate minimum size in logical pixels
-        width, height = x2 - x1, y2 - y1
-        if width < 100 or height < 100:
+        # Calculate sizes in both logical and physical pixels
+        logical_width, logical_height = x2 - x1, y2 - y1
+        physical_width = int(logical_width * sf)
+        physical_height = int(logical_height * sf)
+        
+        # Validate minimum size using physical pixels (what actually gets captured)
+        if physical_width < 100 or physical_height < 100:
             err = self.canvas.create_text(
                 self.screen_width // 2,
                 self.screen_height // 2,
-                text=f"Selected area too small!\nMinimum 100×100\nYour selection: {width}×{height}",
+                text=f"Selected area too small!\nMinimum 100×100 pixels\nYour selection: {physical_width}×{physical_height} pixels",
                 fill='red', font=('Arial', 16, 'bold'), tags="error"
             )
             self.window.after(3000, lambda: self.canvas.delete("error"))
@@ -253,7 +259,8 @@ class SelectionWindow(BaseWindow):
             int(x2 * sf),
             int(y2 * sf),
         )
-        self.logger.info(f"Selection confirmed – Display coords: {x1},{y1},{x2},{y2}  "
+        self.logger.info(f"Selection confirmed – Display size: {logical_width}×{logical_height}  "
+                        f"Physical size: {physical_width}×{physical_height}  "
                         f"Capture coords: {capture_area}")
 
         # Hide window so it doesn't appear in capture
