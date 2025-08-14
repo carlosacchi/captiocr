@@ -104,12 +104,12 @@ class CaptureWindow(BaseWindow):
         # Status label
         self.status_label = tk.Label(
             self.control_frame,
-            text="Capturing...\n(Click and drag to move)",
+            text="Capturing... (Click and drag to move)",
             bg='blue',
             fg='white',
-            font=('Arial', 10)
+            font=('Arial', 9)
         )
-        self.status_label.pack(side=tk.LEFT, padx=10)
+        self.status_label.pack(side=tk.LEFT, padx=5)
         
         # Stop button
         self.stop_button = tk.Button(
@@ -118,19 +118,40 @@ class CaptureWindow(BaseWindow):
             command=self._on_stop_clicked,
             bg='red',
             fg='white',
-            font=('Arial', 10, 'bold'),
+            font=('Arial', 9, 'bold'),
             relief=tk.FLAT,
             cursor='hand2'
         )
-        self.stop_button.pack(side=tk.RIGHT, padx=10, pady=2)
+        self.stop_button.pack(side=tk.RIGHT, padx=8, pady=1)
     
     def _create_capture_frame(self) -> None:
-        """Create the capture area frame (yellow background)."""
-        self.capture_frame = tk.Frame(
+        """Create the capture area frame (transparent with border)."""
+        # Use a Canvas to draw just the border
+        self.capture_frame = tk.Canvas(
             self.window,
-            bg=CAPTURE_WINDOW_COLOR
+            bg=CAPTURE_WINDOW_COLOR,
+            highlightthickness=0
         )
         self.capture_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Draw border rectangle after window is displayed
+        self.window.after(10, self._draw_border)
+    
+    def _draw_border(self) -> None:
+        """Draw a border rectangle on the canvas."""
+        if hasattr(self, 'capture_frame') and self._window_exists():
+            # Get canvas dimensions
+            self.capture_frame.update_idletasks()
+            width = self.capture_frame.winfo_width()
+            height = self.capture_frame.winfo_height()
+            
+            # Draw rectangle border (2 pixels from edge to ensure visibility)
+            self.capture_frame.create_rectangle(
+                2, 2, width-2, height-2,
+                outline='red',
+                width=3,
+                fill=''  # No fill, just border
+            )
     
     def _on_drag_start(self, event) -> None:
         """Handle start of window drag."""

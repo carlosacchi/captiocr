@@ -151,7 +151,8 @@ class SelectionWindow(BaseWindow):
         self.instruction_label = tk.Label(
             self.window,
             text=instructions,
-            bg='yellow',
+            bg='black',
+            fg='white',
             font=('Arial', 12),
             justify=tk.CENTER
         )
@@ -181,7 +182,7 @@ class SelectionWindow(BaseWindow):
         # Create new rectangle
         self.rect_id = self.canvas.create_rectangle(
             self.start_x, self.start_y, self.start_x, self.start_y,
-            outline='red', width=2, tags="selection"
+            outline='red', width=1, tags="selection"
         )
         
         self.logger.debug(f"Selection started at: ({event.x}, {event.y})")

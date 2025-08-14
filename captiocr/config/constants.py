@@ -32,9 +32,9 @@ MIN_TEXT_LENGTH = 10
 MIN_CAPTURE_AREA_SIZE = 100  # pixels
 
 # UI Configuration
-CAPTURE_WINDOW_ALPHA = 0.3
-CAPTURE_WINDOW_COLOR = 'yellow'
-CONTROL_FRAME_HEIGHT = 25  # pixels
+CAPTURE_WINDOW_ALPHA = 0.08  # Nearly transparent
+CAPTURE_WINDOW_COLOR = 'white'  # Using white for transparent effect
+CONTROL_FRAME_HEIGHT = 20  # pixels
 SELECTION_WINDOW_ALPHA = 0.5
 SELECTION_WINDOW_COLOR = 'black'
 
