@@ -1,5 +1,5 @@
-0.10.5-alpha
-14/08/2025
+0.10.16-alpha
+18/08/2025
 CaptiOCR
 Author: Carlo Sacchi
 Website: https://www.captiocr.com

@@ -223,17 +223,17 @@ class MainWindow:
         self.lang_combo.pack(pady=5)
         self.lang_combo.bind("<<ComboboxSelected>>", self._on_language_changed)
         
-        # Start button
+        # Start/Stop button
         self.start_button = tk.Button(
             self.main_frame,
-            text="Start (Select Area)",
-            command=self._start_capture,
+            text="START",
+            command=self._toggle_capture,
             bg="#4CAF50",
             fg="white",
             font=("Arial", 11, "bold"),
             relief=tk.FLAT,
-            padx=12,
-            pady=6,
+            padx=20,
+            pady=8,
             activebackground="#45a049",
             cursor="hand2"
         )
@@ -326,11 +326,19 @@ class MainWindow:
             # Update interval display with loaded values
             self.interval_status_var.set(f"Interval: {self.settings.capture_config.min_capture_interval:.1f}s")
     
+    def _toggle_capture(self) -> None:
+        """Toggle between start and stop capture."""
+        if not self.is_capturing:
+            self._start_capture()
+        else:
+            # Use the same stop logic as the blue bar STOP button
+            if self.capture_window and self.capture_window._window_exists():
+                self.capture_window._on_stop_clicked()
+    
     def _start_capture(self) -> None:
         """Start capture process."""
         try:
             self.logger.info("Starting capture process")
-            self.start_button.config(state=tk.DISABLED)
             self.status_var.set("Select area and press Enter")
             
             # Create selection window
@@ -341,7 +349,6 @@ class MainWindow:
             
         except Exception as e:
             self.logger.error(f"Error starting capture: {e}")
-            self.start_button.config(state=tk.NORMAL)
             messagebox.showerror("Error", f"Failed to start capture: {str(e)}")
     
     def _on_selection_complete(self, area: tuple, scale_factor: float = None) -> None:
@@ -368,8 +375,6 @@ class MainWindow:
             self.selection_window.destroy()
             self.selection_window = None
         
-        # Re-enable start button
-        self.start_button.config(state=tk.NORMAL)
         self.status_var.set("Selection cancelled")
     
     def _begin_capture(self) -> None:
@@ -416,6 +421,12 @@ class MainWindow:
                 self.status_var.set("Capturing... (Press Ctrl+Q or STOP to stop)")
                 # Show initial interval in status bar
                 self._on_interval_change(self.capture_config.current_interval)
+                # Change button to STOP
+                self.start_button.config(
+                    text="STOP",
+                    bg="#f44336",
+                    activebackground="#da190b"
+                )
             else:
                 messagebox.showerror("Error", "Failed to start capture")
                 self._cleanup_capture()
@@ -490,8 +501,15 @@ class MainWindow:
         """Clean up after capture."""
         self.is_capturing = False
         self.capture_area = None
-        self.start_button.config(state=tk.NORMAL)
         self.interval_status_var.set("Interval: --")
+        
+        # Reset button to START
+        self.start_button.config(
+            text="START",
+            bg="#4CAF50",
+            activebackground="#45a049",
+            state=tk.NORMAL
+        )
         
         # Clear captured text display
         self.captured_text_display.config(
