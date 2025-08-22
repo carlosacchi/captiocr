@@ -17,11 +17,12 @@ from ..core.text_processor import TextProcessor
 from ..config.settings import Settings
 from ..config.constants import (
     APP_NAME, APP_VERSION, MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT,
-    MAIN_WINDOW_ALPHA, SUPPORTED_LANGUAGES
+    MAIN_WINDOW_ALPHA, SUPPORTED_LANGUAGES, MONITOR_REFRESH_ON_START
 )
 from ..utils.file_manager import FileManager
 from ..utils.language_manager import LanguageManager
 from ..utils.logger import get_logger
+from ..utils.monitor_manager import MonitorManager
 from captiocr.config.app_info import app_info
 
 class MainWindow:
@@ -96,7 +97,7 @@ class MainWindow:
         self.text_processor = TextProcessor(self.settings.text_similarity_threshold)
         self.capture_config = self.settings.capture_config
         
-        # Screen capture
+        # Screen capture (will be updated with monitor manager after creation)
         self.screen_capture = ScreenCapture(
             self.ocr_processor,
             self.text_processor,
@@ -111,6 +112,10 @@ class MainWindow:
         # Managers
         self.file_manager = FileManager()
         self.language_manager = LanguageManager()
+        self.monitor_manager = MonitorManager()
+        
+        # Set monitor manager in screen capture
+        self.screen_capture.monitor_manager = self.monitor_manager
         
         # Windows
         self.selection_window: Optional[SelectionWindow] = None
@@ -282,15 +287,22 @@ class MainWindow:
     
     def _configure_window(self) -> None:
         """Configure window properties."""
+        # With DPI awareness, we need larger logical dimensions to get proper physical size
+        # Increase base size to compensate for DPI scaling making windows appear smaller
+        window_width = int(MAIN_WINDOW_WIDTH * 1.4)  # Make 40% larger
+        window_height = int(MAIN_WINDOW_HEIGHT * 1.4)  # Make 40% larger
+        
+        self.logger.info(f"Setting window size: {window_width}x{window_height} (logical pixels, scaled from {MAIN_WINDOW_WIDTH}x{MAIN_WINDOW_HEIGHT})")
+        
         # Set size and position
-        self.root.geometry(f"{MAIN_WINDOW_WIDTH}x{MAIN_WINDOW_HEIGHT}")
-        self.root.minsize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
-        self.root.maxsize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
+        self.root.geometry(f"{window_width}x{window_height}")
+        self.root.minsize(window_width, window_height)
+        self.root.maxsize(window_width, window_height)
         
         # Center window
         self.root.update_idletasks()
-        x = (self.root.winfo_screenwidth() - MAIN_WINDOW_WIDTH) // 2
-        y = (self.root.winfo_screenheight() - MAIN_WINDOW_HEIGHT) // 2
+        x = (self.root.winfo_screenwidth() - window_width) // 2
+        y = (self.root.winfo_screenheight() - window_height) // 2
         self.root.geometry(f"+{x}+{y}")
         
         # Set icon if available
@@ -339,10 +351,49 @@ class MainWindow:
         """Start capture process."""
         try:
             self.logger.info("Starting capture process")
+            
+            # Refresh monitor information when START is pressed
+            if MONITOR_REFRESH_ON_START:
+                self.logger.info("Refreshing monitor configuration...")
+                self.status_var.set("Detecting monitors...")
+                self.root.update_idletasks()  # Update UI
+                
+                try:
+                    if self.monitor_manager.refresh_monitors():
+                        monitor_count = self.monitor_manager.get_monitor_count()
+                        multi_monitor = self.monitor_manager.has_multi_monitor()
+                        
+                        self.logger.info(f"Monitor refresh complete: {monitor_count} monitor(s) detected")
+                        
+                        # Update settings with detected monitor configuration
+                        self.settings.update_monitor_config(self.monitor_manager)
+                        
+                        # Save settings to persist monitor configuration
+                        self.settings.save_last_config()
+                        
+                        if multi_monitor:
+                            self.logger.info("Multi-monitor setup detected - selection will cover all monitors")
+                        else:
+                            self.logger.info("Single monitor setup detected")
+                    else:
+                        self.logger.warning("Monitor refresh failed, using defaults")
+                        messagebox.showwarning(
+                            "Monitor Detection", 
+                            "Could not detect monitors properly. Using default settings.\n" +
+                            "Selection may not work correctly on multi-monitor setups."
+                        )
+                except Exception as e:
+                    self.logger.error(f"Error during monitor refresh: {e}")
+                    messagebox.showerror(
+                        "Monitor Detection Error",
+                        f"Error detecting monitors: {str(e)}\n" +
+                        "Continuing with single monitor mode."
+                    )
+            
             self.status_var.set("Select area and press Enter")
             
-            # Create selection window
-            self.selection_window = SelectionWindow(self.root)
+            # Create selection window with monitor manager and settings
+            self.selection_window = SelectionWindow(self.root, self.monitor_manager, self.settings)
             self.selection_window.on_selection_complete = self._on_selection_complete
             self.selection_window.on_selection_cancelled = self._on_selection_cancelled
             self.selection_window.show()

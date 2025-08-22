@@ -45,26 +45,29 @@ class CaptureWindow(BaseWindow):
         self.window.configure(bg=CAPTURE_WINDOW_COLOR)
         
         # Calculate window position and size
+        # With DPI awareness enabled, coordinates are already in logical pixels
         x1, y1, x2, y2 = self.capture_area
-        screen_x      = int(x1 / self.scale_factor)
-        screen_y      = int(y1 / self.scale_factor)
-        screen_width  = int((x2 - x1) / self.scale_factor)
-        screen_height = int((y2 - y1) / self.scale_factor)
+        screen_x      = int(x1)
+        screen_y      = int(y1)
+        screen_width  = int(x2 - x1)
+        screen_height = int(y2 - y1)
         
         # Add space for control frame above the capture area
-        # CONTROL_FRAME_HEIGHT is in logical pixels, convert to screen pixels
-        control_frame_screen_height = int(CONTROL_FRAME_HEIGHT)
-        total_height = screen_height + control_frame_screen_height
+        # CONTROL_FRAME_HEIGHT is already in logical pixels
+        control_frame_height = int(CONTROL_FRAME_HEIGHT)
+        total_height = screen_height + control_frame_height
         
         # Position the window so control frame is above the original capture area
-        window_y = screen_y - control_frame_screen_height
+        window_y = screen_y - control_frame_height
         
         print(f"=== CAPTURE WINDOW DEBUG ===")
-        print(f"Capture area (scaled for ImageGrab): {self.capture_area}")
-        print(f"Scale factor: {self.scale_factor}")
-        print(f"Control frame height (screen): {control_frame_screen_height}")
+        print(f"Original selection: {self.capture_area}")
+        print(f"Selection size: {screen_width} x {screen_height}")
+        print(f"Control frame height: {control_frame_height}")
+        print(f"Total window size: {screen_width} x {total_height}")
         print(f"Window position: {screen_x}, {window_y}")
-        print(f"Window size: {screen_width} x {total_height}")
+        print(f"Expected capture area: {screen_x}, {screen_y}, {screen_x + screen_width}, {screen_y + screen_height}")
+        print(f"Scale factor: {self.scale_factor} (not applied due to DPI awareness)")
         
         # Set geometry - window extends above the original capture area
         self.window.geometry(f"{screen_width}x{total_height}+{screen_x}+{window_y}")
@@ -145,6 +148,9 @@ class CaptureWindow(BaseWindow):
             width = self.capture_frame.winfo_width()
             height = self.capture_frame.winfo_height()
             
+            print(f"=== CAPTURE FRAME DEBUG ===")
+            print(f"Capture frame canvas size: {width} x {height}")
+            
             # Draw rectangle border (2 pixels from edge to ensure visibility)
             self.capture_frame.create_rectangle(
                 2, 2, width-2, height-2,
@@ -181,19 +187,19 @@ class CaptureWindow(BaseWindow):
         current_height = self.window.winfo_height()
         
         # Calculate the actual capture area (excluding control frame)
-        control_frame_screen_height = int(CONTROL_FRAME_HEIGHT)
+        control_frame_height = int(CONTROL_FRAME_HEIGHT)
         
         # The capture area starts below the control frame
-        capture_screen_x = current_x
-        capture_screen_y = current_y + control_frame_screen_height
-        capture_screen_width = current_width
-        capture_screen_height = current_height - control_frame_screen_height
+        capture_x = current_x
+        capture_y = current_y + control_frame_height
+        capture_width = current_width
+        capture_height = current_height - control_frame_height
         
-        # Convert capture area back to absolute coordinates for ImageGrab
-        abs_x1 = int(capture_screen_x * self.scale_factor)
-        abs_y1 = int(capture_screen_y * self.scale_factor)
-        abs_x2 = abs_x1 + int(capture_screen_width * self.scale_factor)
-        abs_y2 = abs_y1 + int(capture_screen_height * self.scale_factor)
+        # With DPI awareness, coordinates are already in correct format for ImageGrab
+        abs_x1 = int(capture_x)
+        abs_y1 = int(capture_y)
+        abs_x2 = abs_x1 + int(capture_width)
+        abs_y2 = abs_y1 + int(capture_height)
         
         # Update capture area
         self.capture_area = (abs_x1, abs_y1, abs_x2, abs_y2)

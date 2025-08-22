@@ -20,14 +20,14 @@ from .text_processor import TextProcessor
 from ..models.capture_config import CaptureConfig
 from ..utils.file_manager import FileManager
 from ..config.constants import TIMESTAMP_FORMAT
-from ..config.constants import CAPTURES_DIR
+from ..config.constants import CAPTURES_DIR, MONITOR_DISCONNECTION_CHECK_INTERVAL
 
 
 class ScreenCapture:
     """Handle screen capture and OCR processing."""
     
     def __init__(self, ocr_processor: OCRProcessor, text_processor: TextProcessor,
-                capture_config: CaptureConfig):
+                capture_config: CaptureConfig, monitor_manager=None):
         """
         Initialize screen capture.
         
@@ -35,10 +35,12 @@ class ScreenCapture:
             ocr_processor: OCR processor instance
             text_processor: Text processor instance
             capture_config: Capture configuration
+            monitor_manager: Optional monitor manager for multi-monitor support
         """
         self.ocr_processor = ocr_processor
         self.text_processor = text_processor
         self.capture_config = capture_config
+        self.monitor_manager = monitor_manager
         self.logger = logging.getLogger('CaptiOCR.ScreenCapture')
         
         # Capture state
@@ -54,6 +56,10 @@ class ScreenCapture:
         
         # Text history
         self.text_history = deque(maxlen=5)
+        
+        # Monitor validation
+        self.last_monitor_check = 0.0
+        self.monitor_check_failures = 0
         
         # Callbacks
         self.on_text_captured: Optional[Callable[[str], None]] = None
@@ -161,8 +167,56 @@ class ScreenCapture:
             
             while not self.capture_stop_flag:
                 try:
+                    # Validate capture area (check for monitor disconnection)
+                    if not self._validate_capture_area():
+                        self.logger.warning("Capture area no longer valid, stopping capture")
+                        self.capture_stop_flag = True
+                        break
+                    
                     # Capture screenshot
-                    screenshot = ImageGrab.grab(bbox=self.capture_area)
+                    x1, y1, x2, y2 = self.capture_area
+                    
+                    # Check if we need multi-monitor capture
+                    needs_multi_monitor_capture = False
+                    
+                    if self.monitor_manager and self.monitor_manager.has_multi_monitor():
+                        # For multi-monitor setups, always use all_screens=True
+                        needs_multi_monitor_capture = True
+                        self.logger.debug(f"Multi-monitor setup detected, using all_screens=True for: {self.capture_area}")
+                    elif x1 < 0 or y1 < 0:
+                        # Legacy fallback for negative coordinates (shouldn't happen with monitor manager)
+                        needs_multi_monitor_capture = True
+                        self.logger.debug(f"Negative coordinates detected, using all_screens=True for: {self.capture_area}")
+                    
+                    if needs_multi_monitor_capture:
+                        # Try to capture with ImageGrab all_screens parameter for multi-monitor
+                        try:
+                            screenshot = ImageGrab.grab(bbox=self.capture_area, all_screens=True)
+                            self.logger.debug(f"Successfully captured with all_screens=True")
+                        except Exception as e:
+                            self.logger.error(f"Failed to capture with all_screens=True: {e}")
+                            # Fallback: try without bbox to get full desktop, then crop
+                            try:
+                                full_screenshot = ImageGrab.grab(all_screens=True)
+                                # Get virtual screen bounds
+                                if self.monitor_manager:
+                                    vx, vy, vw, vh = self.monitor_manager.get_virtual_screen_bounds()
+                                    # Convert capture area to relative coordinates
+                                    rel_x1 = x1 - vx
+                                    rel_y1 = y1 - vy
+                                    rel_x2 = x2 - vx
+                                    rel_y2 = y2 - vy
+                                    screenshot = full_screenshot.crop((rel_x1, rel_y1, rel_x2, rel_y2))
+                                    self.logger.debug(f"Cropped from full screenshot: {rel_x1},{rel_y1},{rel_x2},{rel_y2}")
+                                else:
+                                    raise Exception("No monitor manager available for coordinate conversion")
+                            except Exception as e2:
+                                self.logger.error(f"All capture methods failed: {e2}")
+                                continue  # Skip this capture attempt
+                    else:
+                        # Single monitor setup - standard capture
+                        self.logger.debug(f"Single monitor setup, using standard capture for: {self.capture_area}")
+                        screenshot = ImageGrab.grab(bbox=self.capture_area)
                     
                     # Optimize image if needed
                     screenshot = self.ocr_processor.optimize_image_for_ocr(screenshot)
@@ -229,6 +283,50 @@ class ScreenCapture:
                 time.sleep(0.1)
         except Exception as e:
             self.logger.error(f"Error monitoring stop key: {e}")
+    
+    def _validate_capture_area(self) -> bool:
+        """
+        Validate that the capture area is still valid (monitor not disconnected).
+        
+        Returns:
+            True if capture area is still valid
+        """
+        if not self.monitor_manager or not self.capture_area:
+            return True  # No validation possible or needed
+        
+        current_time = time.time()
+        
+        # Only check periodically to avoid performance impact
+        if current_time - self.last_monitor_check < MONITOR_DISCONNECTION_CHECK_INTERVAL:
+            return True
+        
+        self.last_monitor_check = current_time
+        
+        try:
+            # Check if capture area is still valid
+            is_valid = self.monitor_manager.validate_capture_area(self.capture_area)
+            
+            if is_valid:
+                self.monitor_check_failures = 0
+                return True
+            else:
+                self.monitor_check_failures += 1
+                self.logger.warning(
+                    f"Capture area validation failed (attempt {self.monitor_check_failures})"
+                )
+                
+                # Allow a few failures before stopping (monitor might be temporarily unavailable)
+                if self.monitor_check_failures >= 3:
+                    self.logger.error("Monitor appears to be disconnected, stopping capture")
+                    if self.on_status_update:
+                        self.on_status_update("Monitor disconnected - stopping capture")
+                    return False
+                
+                return True
+        
+        except Exception as e:
+            self.logger.error(f"Error validating capture area: {e}")
+            return True  # Continue on error to avoid disruption
     
     def process_capture_file(self, filepath: str, custom_name: Optional[str] = None) -> Optional[str]:
         """

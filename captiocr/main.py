@@ -3,6 +3,7 @@ Main entry point for CaptiOCR application.
 """
 import sys
 import logging
+import ctypes
 from pathlib import Path
 
 # Always use absolute imports for exe compatibility
@@ -12,9 +13,49 @@ from captiocr.utils.file_manager import FileManager
 from captiocr.config.constants import APP_NAME, APP_VERSION
 
 
+def set_dpi_awareness():
+    """Set DPI awareness for accurate multi-monitor DPI detection."""
+    if sys.platform != 'win32':
+        return
+    
+    try:
+        # Try the most modern DPI awareness first (Windows 10 1703+)
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = -4
+        result = ctypes.windll.user32.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        if result:
+            print("DPI awareness set to PER_MONITOR_AWARE_V2")
+            return
+    except Exception as e:
+        print(f"SetProcessDpiAwarenessContext failed: {e}")
+    
+    try:
+        # Fallback to older API (Windows 8.1+)
+        PROCESS_PER_MONITOR_DPI_AWARE = 2
+        result = ctypes.windll.shcore.SetProcessDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE)
+        if result == 0:  # S_OK
+            print("DPI awareness set to PROCESS_PER_MONITOR_DPI_AWARE")
+            return
+    except Exception as e:
+        print(f"SetProcessDpiAwareness failed: {e}")
+    
+    try:
+        # Final fallback to basic DPI awareness (Windows Vista+)
+        result = ctypes.windll.user32.SetProcessDPIAware()
+        if result:
+            print("DPI awareness set to basic DPI_AWARE")
+            return
+    except Exception as e:
+        print(f"SetProcessDPIAware failed: {e}")
+    
+    print("Warning: Could not set DPI awareness - DPI detection may be inaccurate")
+
+
 def main():
     """Main application entry point."""
     try:
+        # Set DPI awareness before any GUI operations
+        set_dpi_awareness()
+        
         # Initialize logging (simplified for exe)
         try:
             LoggerSetup()

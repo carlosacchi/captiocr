@@ -32,9 +32,9 @@ MIN_TEXT_LENGTH = 10
 MIN_CAPTURE_AREA_SIZE = 100  # pixels
 
 # UI Configuration
-CAPTURE_WINDOW_ALPHA = 0.08  # Nearly transparent
+CAPTURE_WINDOW_ALPHA = 0.1  # Semi-transparent - control frame visible, capture area distinguishable
 CAPTURE_WINDOW_COLOR = 'white'  # Using white for transparent effect
-CONTROL_FRAME_HEIGHT = 20  # pixels
+CONTROL_FRAME_HEIGHT = 30  # pixels - increased to avoid overlap with capture area
 SELECTION_WINDOW_ALPHA = 0.5
 SELECTION_WINDOW_COLOR = 'black'
 
@@ -78,6 +78,11 @@ OCR_CONFIG_GENERAL = "--psm 6 --oem 1"  # Uniform text block for documents
 CAPTURE_FILE_PREFIX = "capture_"
 PROCESSED_FILE_SUFFIX = "_processed"
 TIMESTAMP_FORMAT = "%Y-%m-%d-%H-%M-%S"
+
+# Multi-Monitor Configuration
+DEFAULT_DPI = 96
+MONITOR_REFRESH_ON_START = True
+MONITOR_DISCONNECTION_CHECK_INTERVAL = 5.0  # seconds
 
 # Language Download Configuration
 TESSDATA_DOWNLOAD_URL = "https://github.com/tesseract-ocr/tessdata/raw/main/{}.traineddata"

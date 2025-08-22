@@ -27,6 +27,13 @@ class Settings:
         self.use_caption_mode = True  # Caption Mode is default
         self.custom_tessdata_path = ""
         
+        # Monitor configuration
+        self.monitors = {
+            "primary": {"dpi": 96, "scale_factor": 1.0, "width": 1920, "height": 1080},
+            "secondary": {"dpi": 96, "scale_factor": 1.0, "width": 0, "height": 0},
+            "last_detected": None
+        }
+        
         # Capture configuration
         self.capture_config = CaptureConfig()
     
@@ -45,6 +52,83 @@ class Settings:
             Path to profile file
         """
         return CONFIG_DIR / f"{profile_name}_preferences.json"
+    
+    def update_monitor_config(self, monitor_manager) -> None:
+        """
+        Update monitor configuration from monitor manager.
+        
+        Args:
+            monitor_manager: MonitorManager instance with detected monitors
+        """
+        try:
+            primary_monitor = monitor_manager.get_primary_monitor()
+            if primary_monitor:
+                self.monitors["primary"] = {
+                    "dpi": primary_monitor.dpi,
+                    "scale_factor": primary_monitor.scale_factor,
+                    "width": primary_monitor.width,
+                    "height": primary_monitor.height
+                }
+                
+            # Find secondary monitor (first non-primary)
+            secondary_monitor = None
+            for monitor in monitor_manager.monitors:
+                if not monitor.primary:
+                    secondary_monitor = monitor
+                    break
+                    
+            if secondary_monitor:
+                self.monitors["secondary"] = {
+                    "dpi": secondary_monitor.dpi,
+                    "scale_factor": secondary_monitor.scale_factor,
+                    "width": secondary_monitor.width,
+                    "height": secondary_monitor.height,
+                    "x": secondary_monitor.x,
+                    "y": secondary_monitor.y
+                }
+            else:
+                # No secondary monitor
+                self.monitors["secondary"] = {
+                    "dpi": 96, "scale_factor": 1.0, 
+                    "width": 0, "height": 0
+                }
+                
+            self.monitors["last_detected"] = datetime.now().isoformat()
+            
+            self.logger.info(f"Monitor config updated: Primary={self.monitors['primary']}, "
+                           f"Secondary={self.monitors['secondary']}")
+            
+        except Exception as e:
+            self.logger.error(f"Error updating monitor config: {e}")
+    
+    def get_scale_factor_for_coordinates(self, x: int, y: int) -> float:
+        """
+        Get scale factor based on coordinates by checking monitor bounds.
+        
+        Args:
+            x: X coordinate
+            y: Y coordinate
+            
+        Returns:
+            Scale factor for the monitor containing these coordinates
+        """
+        # Check if coordinates are within secondary monitor bounds
+        secondary = self.monitors["secondary"]
+        if (secondary.get("width", 0) > 0 and secondary.get("height", 0) > 0):
+            sec_x = secondary.get("x", 0)
+            sec_y = secondary.get("y", 0)
+            sec_width = secondary["width"]
+            sec_height = secondary["height"]
+            
+            # Check if point is within secondary monitor bounds
+            if (sec_x <= x < sec_x + sec_width and 
+                sec_y <= y < sec_y + sec_height):
+                self.logger.debug(f"Coordinates ({x}, {y}) on secondary monitor, scale={secondary['scale_factor']}")
+                return secondary["scale_factor"]
+        
+        # Default to primary monitor
+        self.logger.debug(f"Coordinates ({x}, {y}) on primary monitor, scale={self.monitors['primary']['scale_factor']}")
+        return self.monitors["primary"]["scale_factor"]
     
     def save(self, profile_name: str = "default") -> bool:
         """
@@ -200,6 +284,7 @@ class Settings:
             'text_similarity_threshold': self.text_similarity_threshold,
             'use_caption_mode': self.use_caption_mode,
             'custom_tessdata_path': self.custom_tessdata_path,
+            'monitors': self.monitors,
             **self.capture_config.to_dict()
         }
     
@@ -224,6 +309,11 @@ class Settings:
             self.custom_tessdata_path = custom_path
             os.environ['TESSDATA_PREFIX'] = custom_path
             self.logger.info(f"Custom tessdata path set: {custom_path}")
+        
+        # Load monitor configuration
+        if 'monitors' in settings_dict:
+            self.monitors = settings_dict['monitors']
+            self.logger.info(f"Loaded monitor config: {self.monitors}")
         
         # Load capture configuration
         self.capture_config.from_dict(settings_dict)

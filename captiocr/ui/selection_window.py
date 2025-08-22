@@ -10,11 +10,15 @@ from ..config.constants import SELECTION_WINDOW_ALPHA, SELECTION_WINDOW_COLOR
 
 
 class SelectionWindow(BaseWindow):
-    """Fullscreen overlay window for area selection."""
+    """Fullscreen overlay window for area selection across multiple monitors."""
     
-    def __init__(self, parent: tk.Tk):
+    def __init__(self, parent: tk.Tk, monitor_manager=None, settings=None):
         """Initialize selection window."""
         super().__init__(parent, "Area Selection")
+        
+        # Monitor management
+        self.monitor_manager = monitor_manager
+        self.settings = settings
         
         # Selection state
         self.start_x: Optional[int] = None
@@ -26,66 +30,56 @@ class SelectionWindow(BaseWindow):
         self.on_selection_complete: Optional[Callable[[Tuple[int, int, int, int]], None]] = None
         self.on_selection_cancelled: Optional[Callable[[], None]] = None
         
-        # Get screen dimensions and DPI scaling
-        parent.update()  # Ensure window is drawn
-        self.screen_width = parent.winfo_screenwidth()
-        self.screen_height = parent.winfo_screenheight()
+        # Get virtual desktop dimensions
+        if self.monitor_manager:
+            self.virtual_bounds = self.monitor_manager.get_virtual_screen_bounds()
+            self.logger.info(f"Virtual desktop: {self.virtual_bounds}")
+            self.logger.info(f"Found {self.monitor_manager.get_monitor_count()} monitor(s)")
+        else:
+            # Fallback to single monitor
+            parent.update()
+            self.virtual_bounds = (0, 0, parent.winfo_screenwidth(), parent.winfo_screenheight())
+            self.logger.warning("No monitor manager available, using single monitor fallback")
         
-        print(f"Actual screen dimensions: {self.screen_width}x{self.screen_height}")
+        # For backward compatibility, set screen dimensions
+        self.screen_width = self.virtual_bounds[2]  # width
+        self.screen_height = self.virtual_bounds[3]  # height
         
-        self.scale_factor = self._detect_dpi_scaling()
+        # Don't set a default scale factor - we'll get the correct one per-monitor from settings
+        self.scale_factor = None
         
-        self.logger.info(f"Screen dimensions: {self.screen_width}x{self.screen_height}")
-        self.logger.info(f"DPI scale factor: {self.scale_factor}")
+        self.logger.info(f"Selection window will cover: {self.virtual_bounds}")
+        if self.monitor_manager:
+            self.logger.info(f"Per-monitor DPI scaling will be used")
+        else:
+            self.logger.info(f"Fallback DPI scale factor: 1.0")
     
     def _detect_dpi_scaling(self) -> float:
         """Detect screen DPI scaling factor."""
         try:
-            print("Detecting DPI scaling...")
-            
-            # Method 1: Use ctypes on Windows (ESATTAMENTE COME L'ORIGINALE)
+            # Use ctypes on Windows
             try:
                 import ctypes
-                user32 = ctypes.windll.user32
-                
-                # Try to get DPI awareness first
-                awareness = ctypes.c_int()
-                error = ctypes.windll.shcore.GetProcessDpiAwareness(0, ctypes.byref(awareness))
-                
-                if error == 0:  # S_OK
-                    # Now get the actual scale factor
-                    scale_factor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100
-                    print(f"Method 1: DPI scaling detected: {scale_factor}")
-                    return scale_factor
-            except Exception as e:
-                print(f"Method 1 failed: {str(e)}")
-            
-            # Method 2: Use Tkinter's scaling
-            try:
-                # Get Tkinter's scaling factor
-                scale_factor = self.parent.tk.call('tk', 'scaling')
-                print(f"Method 2: Tkinter scaling: {scale_factor}")
-                # Tkinter scaling is typically 96 DPI = 1.0
-                # Convert to Windows scaling (where 96 DPI = 1.0, 120 DPI = 1.25, 144 DPI = 1.5)
+                # Get the actual scale factor
+                scale_factor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100
+                self.logger.debug(f"Windows scale factor detected: {scale_factor}")
                 return scale_factor
             except Exception as e:
-                print(f"Method 2 failed: {str(e)}")
+                self.logger.debug(f"Windows scale detection failed: {e}")
             
-            # Method 3: Use winfo_fpixels
+            # Use Tkinter's scaling as fallback
             try:
-                # Get the ratio of pixels per point
                 scale_factor = self.parent.winfo_fpixels('1i') / 96.0
-                print(f"Method 3: winfo_fpixels scaling: {scale_factor}")
+                self.logger.debug(f"Tkinter scale factor: {scale_factor}")
                 return scale_factor
             except Exception as e:
-                print(f"Method 3 failed: {str(e)}")
+                self.logger.debug(f"Tkinter scale detection failed: {e}")
                 
-            # If all methods fail, return a default value of 1.0
-            print("All methods failed, using default scaling of 1.0")
+            # Default
             return 1.0
             
         except Exception as e:
-            print(f"Critical error in detect_dpi_scaling: {str(e)}")
+            self.logger.error(f"Error in detect_dpi_scaling: {e}")
             return 1.0
     
     def show(self) -> None:
@@ -93,12 +87,17 @@ class SelectionWindow(BaseWindow):
         # Create fullscreen window
         self.create_window()
         
-        # Configure window
-        self.window.attributes('-fullscreen', True)
+        # Configure window to cover virtual desktop
+        x, y, width, height = self.virtual_bounds
+        
+        self.window.attributes('-fullscreen', False)  # Don't use fullscreen mode
         self.window.attributes('-alpha', SELECTION_WINDOW_ALPHA)
         self.window.attributes('-topmost', True)
         self.window.overrideredirect(True)
         self.window.configure(bg=SELECTION_WINDOW_COLOR)
+        
+        # Set geometry to cover virtual desktop (all monitors)
+        self.window.geometry(f"{width}x{height}+{x}+{y}")
         
         # Create canvas
         self.canvas = tk.Canvas(
@@ -145,55 +144,103 @@ class SelectionWindow(BaseWindow):
     def _add_instructions(self) -> None:
         """Add instruction text to the window."""
         instructions = """Click and drag to select capture area.
-    Press ESC to cancel.
-    Press Enter to confirm selection."""
+Press ESC to cancel.
+Press Enter to confirm selection."""
         
-        self.instruction_label = tk.Label(
-            self.window,
-            text=instructions,
-            bg='black',
-            fg='white',
-            font=('Arial', 12),
-            justify=tk.CENTER
-        )
-        self.instruction_label.place(relx=0.5, rely=0.95, anchor=tk.S)
-        
-        # Aggiungi un pulsante Cancel
-        cancel_button = tk.Button(
-            self.window,
-            text="Cancel (ESC)",
-            command=self._on_cancel,
-            bg='red',
-            fg='white',
-            font=('Arial', 10, 'bold'),
-            cursor='hand2'
-        )
-        cancel_button.place(relx=0.95, rely=0.05, anchor=tk.NE)
+        if self.monitor_manager:
+            # Add instructions for each monitor
+            for monitor in self.monitor_manager.monitors:
+                label = tk.Label(
+                    self.window,
+                    text=instructions,
+                    bg='yellow',
+                    font=('Arial', 12),
+                    justify=tk.CENTER
+                )
+                
+                # Position at bottom of each monitor, adjusted for virtual screen offset
+                label_x = monitor.x + monitor.width // 2 - self.virtual_bounds[0]
+                label_y = monitor.y + monitor.height - 50 - self.virtual_bounds[1]
+                
+                label.place(x=label_x, y=label_y, anchor=tk.S)
+            
+            # Add cancel button on primary monitor
+            primary = self.monitor_manager.get_primary_monitor()
+            if primary:
+                btn_x = primary.x + primary.width - 100 - self.virtual_bounds[0]
+                btn_y = primary.y + 20 - self.virtual_bounds[1]
+                
+                cancel_button = tk.Button(
+                    self.window,
+                    text="Cancel (ESC)",
+                    command=self._on_cancel,
+                    bg='red',
+                    fg='white',
+                    font=('Arial', 10, 'bold'),
+                    cursor='hand2'
+                )
+                cancel_button.place(x=btn_x, y=btn_y)
+        else:
+            # Fallback for single monitor
+            self.instruction_label = tk.Label(
+                self.window,
+                text=instructions,
+                bg='yellow',
+                font=('Arial', 12),
+                justify=tk.CENTER
+            )
+            self.instruction_label.place(relx=0.5, rely=0.95, anchor=tk.S)
+            
+            cancel_button = tk.Button(
+                self.window,
+                text="Cancel (ESC)",
+                command=self._on_cancel,
+                bg='red',
+                fg='white',
+                font=('Arial', 10, 'bold'),
+                cursor='hand2'
+            )
+            cancel_button.place(relx=0.95, rely=0.05, anchor=tk.NE)
     
     def _on_mouse_down(self, event) -> None:
         """Handle mouse button press."""
-        self.start_x = event.x
-        self.start_y = event.y
+        # Convert canvas coordinates to screen coordinates  
+        screen_x = event.x + self.virtual_bounds[0]
+        screen_y = event.y + self.virtual_bounds[1]
+        
+        self.start_x = screen_x
+        self.start_y = screen_y
         
         # Delete any existing rectangle
         if self.rect_id:
             self.canvas.delete(self.rect_id)
         
-        # Create new rectangle
+        # Create new rectangle (use canvas coordinates for drawing)
         self.rect_id = self.canvas.create_rectangle(
-            self.start_x, self.start_y, self.start_x, self.start_y,
-            outline='red', width=1, tags="selection"
+            event.x, event.y, event.x, event.y,
+            outline='red', width=2, tags="selection"
         )
         
-        self.logger.debug(f"Selection started at: ({event.x}, {event.y})")
+        # Log which monitor the selection started on
+        if self.monitor_manager:
+            monitor = self.monitor_manager.get_monitor_from_point(screen_x, screen_y)
+            if monitor:
+                self.logger.info(f"Selection started on {monitor.name} at ({screen_x}, {screen_y})")
+                self.logger.info(f"Monitor info: bounds={monitor.bounds}, DPI={monitor.dpi}, Scale={monitor.scale_factor}")
+        else:
+            self.logger.info(f"Selection started at: ({screen_x}, {screen_y})")
     
     def _on_mouse_drag(self, event) -> None:
         """Handle mouse drag."""
         if self.rect_id and self.start_x is not None:
+            # Convert start position to canvas coordinates
+            start_canvas_x = self.start_x - self.virtual_bounds[0]
+            start_canvas_y = self.start_y - self.virtual_bounds[1]
+            
             # Update rectangle
             self.canvas.coords(
                 self.rect_id,
-                self.start_x, self.start_y, event.x, event.y
+                start_canvas_x, start_canvas_y, event.x, event.y
             )
             
             # Add fill for better visibility
@@ -205,11 +252,15 @@ class SelectionWindow(BaseWindow):
     def _on_mouse_up(self, event) -> None:
         """Handle mouse button release."""
         if self.rect_id and self.start_x is not None and self.start_y is not None:
-            # Calculate final coordinates
-            x1 = min(self.start_x, event.x)
-            y1 = min(self.start_y, event.y)
-            x2 = max(self.start_x, event.x)
-            y2 = max(self.start_y, event.y)
+            # Convert to screen coordinates
+            end_x = event.x + self.virtual_bounds[0]
+            end_y = event.y + self.virtual_bounds[1]
+            
+            # Calculate final coordinates in screen space
+            x1 = min(self.start_x, end_x)
+            y1 = min(self.start_y, end_y)
+            x2 = max(self.start_x, end_x)
+            y2 = max(self.start_y, end_y)
             
             # Update rectangle appearance
             self.canvas.itemconfig(
@@ -217,11 +268,17 @@ class SelectionWindow(BaseWindow):
                 outline='green', width=3
             )
             
-            # Store selection
+            # Store selection in screen coordinates
             self.selection_area = (x1, y1, x2, y2)
             
-            self.logger.debug(f"Selection ended at: ({event.x}, {event.y})")
-            self.logger.debug(f"Selection area: {self.selection_area}")
+            # Log selection info
+            if self.monitor_manager:
+                monitor = self.monitor_manager.get_monitor_from_point(x1, y1)
+                if monitor:
+                    self.logger.debug(f"Selection ended on {monitor.name}: {self.selection_area}")
+            else:
+                self.logger.debug(f"Selection ended at: ({end_x}, {end_y})")
+                self.logger.debug(f"Selection area: {self.selection_area}")
     
     def _on_confirm(self, event=None) -> None:
         """Handle selection confirmation."""
@@ -229,20 +286,35 @@ class SelectionWindow(BaseWindow):
             return
 
         x1, y1, x2, y2 = self.selection_area
-        sf = self.scale_factor
-
-        # Debug
-        print(f"Raw selection (logical pixels): {x1}, {y1}, {x2}, {y2}")
-        print(f"Scale factor: {sf}")
-        print(f"Logical size: {x2-x1}×{y2-y1} pixels")
-        print(f"Physical size: {int((x2-x1)*sf)}×{int((y2-y1)*sf)} pixels")
-
-        # Calculate sizes in both logical and physical pixels
-        logical_width, logical_height = x2 - x1, y2 - y1
-        physical_width = int(logical_width * sf)
-        physical_height = int(logical_height * sf)
         
-        # Validate minimum size using physical pixels (what actually gets captured)
+        # Calculate sizes in logical pixels
+        logical_width, logical_height = x2 - x1, y2 - y1
+        
+        # Use scale factor from monitor manager or settings based on coordinates
+        center_x = (x1 + x2) // 2
+        center_y = (y1 + y2) // 2
+        
+        if self.monitor_manager:
+            # Prefer monitor manager for accurate per-monitor DPI
+            scale_factor = self.monitor_manager.get_scale_factor_for_point(center_x, center_y)
+            self.logger.info(f"Using scale factor {scale_factor} from monitor manager for center coordinates ({center_x}, {center_y})")
+        elif self.settings:
+            # Fallback to settings if no monitor manager available
+            scale_factor = self.settings.get_scale_factor_for_coordinates(center_x, center_y)
+            self.logger.info(f"Using scale factor {scale_factor} from settings based on center coordinates ({center_x}, {center_y})")
+        else:
+            scale_factor = 1.0
+            self.logger.info(f"No monitor manager or settings available, using default scale factor 1.0")
+        
+        # With DPI awareness enabled, coordinates are already in physical pixels
+        # We don't need to apply scale factor for ImageGrab
+        capture_area = (x1, y1, x2, y2)
+        
+        # Calculate physical size for validation (already in physical pixels)
+        physical_width = logical_width  # These are actually physical pixels now
+        physical_height = logical_height
+        
+        # Validate minimum size
         if physical_width < 100 or physical_height < 100:
             err = self.canvas.create_text(
                 self.screen_width // 2,
@@ -252,24 +324,24 @@ class SelectionWindow(BaseWindow):
             )
             self.window.after(3000, lambda: self.canvas.delete("error"))
             return
-
-        # **Scale up** to true device pixels for ImageGrab
-        capture_area = (
-            int(x1 * sf),
-            int(y1 * sf),
-            int(x2 * sf),
-            int(y2 * sf),
+        
+        self.logger.info(
+            f"Selection confirmed:\n"
+            f"  Screen coords: {self.selection_area}\n"
+            f"  Capture area: {capture_area}\n"
+            f"  Detected scale factor: {scale_factor:.2f} (not applied due to DPI awareness)"
         )
-        self.logger.info(f"Selection confirmed – Display size: {logical_width}×{logical_height}  "
-                        f"Physical size: {physical_width}×{physical_height}  "
-                        f"Capture coords: {capture_area}")
 
         # Hide window so it doesn't appear in capture
+        try:
+            self.window.grab_release()
+        except:
+            pass
         self.window.withdraw()
 
-        # Fire the callback with the correctly scaled area
+        # Fire the callback with coordinates (already physical due to DPI awareness)
         if self.on_selection_complete:
-            self.on_selection_complete(capture_area, sf)
+            self.on_selection_complete(capture_area, scale_factor)
 
         # Clean up after a moment
         self.window.after(50, self.destroy)
