@@ -93,6 +93,9 @@ class CaptureWindow(BaseWindow):
         self.window.focus_force()
         self.window.bind_all('<Control-q>', lambda e: self._on_stop_clicked())
         
+        # Windows 11 workaround: refresh topmost after a short delay
+        self.window.after(500, lambda: self._refresh_topmost())
+        
         self.logger.info(f"Capture window shown at {screen_x},{window_y} size {screen_width}x{total_height}")
     
     def _create_control_frame(self) -> None:
@@ -186,6 +189,10 @@ class CaptureWindow(BaseWindow):
         current_width = self.window.winfo_width()
         current_height = self.window.winfo_height()
         
+        # Re-apply topmost after drag operation
+        self.window.attributes('-topmost', True)
+        self.window.lift()
+        
         # Calculate the actual capture area (excluding control frame)
         control_frame_height = int(CONTROL_FRAME_HEIGHT)
         
@@ -233,3 +240,12 @@ class CaptureWindow(BaseWindow):
         """
         if self._window_exists() and hasattr(self, 'status_label'):
             self.status_label.config(text=text)
+    
+    def _refresh_topmost(self) -> None:
+        """Refresh topmost status once to handle Windows 11 issues."""
+        if self._window_exists():
+            try:
+                self.window.attributes('-topmost', True)
+                self.window.lift()
+            except Exception:
+                pass

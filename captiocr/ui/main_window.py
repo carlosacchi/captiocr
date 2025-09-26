@@ -460,12 +460,6 @@ class MainWindow:
             # to account for the control frame positioned above it
             self.screen_capture.set_capture_area(self.capture_area)
             
-            # # Create capture window
-            # self.capture_window = CaptureWindow(self.root, self.capture_area)
-            # self.capture_window.on_stop = self._stop_capture
-            # self.capture_window.on_position_changed = self._on_capture_window_moved
-            # self.capture_window.show()
-            
             # Start capture
             if self.screen_capture.start_capture(lang_code, self.use_caption_mode.get()):
                 self.is_capturing = True
