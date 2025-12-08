@@ -93,8 +93,12 @@ class CaptureWindow(BaseWindow):
         self.window.focus_force()
         self.window.bind_all('<Control-q>', lambda e: self._on_stop_clicked())
         
-        # Windows 11 workaround: refresh topmost after a short delay
-        self.window.after(500, lambda: self._refresh_topmost())
+        # Bind events to re-assert topmost when focus/visibility changes
+        for ev in ('<FocusOut>', '<Map>', '<Configure>'):
+            self.window.bind(ev, lambda e: self._raise_topmost())
+        
+        # Windows 11 workaround: start periodic topmost refresh
+        self.window.after(500, self._refresh_topmost)
         
         self.logger.info(f"Capture window shown at {screen_x},{window_y} size {screen_width}x{total_height}")
     
@@ -241,11 +245,24 @@ class CaptureWindow(BaseWindow):
         if self._window_exists() and hasattr(self, 'status_label'):
             self.status_label.config(text=text)
     
-    def _refresh_topmost(self) -> None:
-        """Refresh topmost status once to handle Windows 11 issues."""
+    def _raise_topmost(self) -> None:
+        """Re-assert topmost when triggered by events."""
         if self._window_exists():
             try:
                 self.window.attributes('-topmost', True)
                 self.window.lift()
+            except Exception:
+                pass
+    
+    def _refresh_topmost(self) -> None:
+        """Periodically refresh topmost status to handle Windows 11 issues."""
+        if self._window_exists():
+            try:
+                # Flip trick: toggle topmost to force Windows z-order recalculation
+                self.window.attributes('-topmost', False)
+                self.window.attributes('-topmost', True)
+                self.window.lift()
+                # Schedule next refresh every 1500ms
+                self.window.after(1500, self._refresh_topmost)
             except Exception:
                 pass
