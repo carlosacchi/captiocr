@@ -6,7 +6,7 @@ from typing import Optional, Callable, Tuple
 import logging
 
 from .base_window import BaseWindow
-from ..config.constants import SELECTION_WINDOW_ALPHA, SELECTION_WINDOW_COLOR
+from ..config.constants import SELECTION_WINDOW_ALPHA, SELECTION_WINDOW_COLOR, MIN_CAPTURE_AREA_SIZE
 
 
 class SelectionWindow(BaseWindow):
@@ -315,11 +315,11 @@ Press Enter to confirm selection."""
         physical_height = logical_height
         
         # Validate minimum size
-        if physical_width < 100 or physical_height < 100:
+        if physical_width < MIN_CAPTURE_AREA_SIZE or physical_height < MIN_CAPTURE_AREA_SIZE:
             err = self.canvas.create_text(
                 self.screen_width // 2,
                 self.screen_height // 2,
-                text=f"Selected area too small!\nMinimum 100×100 pixels\nYour selection: {physical_width}×{physical_height} pixels",
+                text=f"Selected area too small!\nMinimum {MIN_CAPTURE_AREA_SIZE}×{MIN_CAPTURE_AREA_SIZE} pixels\nYour selection: {physical_width}×{physical_height} pixels",
                 fill='red', font=('Arial', 16, 'bold'), tags="error"
             )
             self.window.after(3000, lambda: self.canvas.delete("error"))

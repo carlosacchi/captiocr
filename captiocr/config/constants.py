@@ -25,11 +25,11 @@ MAIN_WINDOW_ALPHA = 0.92
 
 # Capture Configuration
 DEFAULT_MIN_CAPTURE_INTERVAL = 3.0  # seconds
-DEFAULT_MAX_CAPTURE_INTERVAL = 5.0  # seconds
+DEFAULT_MAX_CAPTURE_INTERVAL = 6.0  # seconds
 MAX_SIMILAR_CAPTURES = 1
 TEXT_SIMILARITY_THRESHOLD = 0.8
 MIN_TEXT_LENGTH = 10
-MIN_CAPTURE_AREA_SIZE = 100  # pixels
+MIN_CAPTURE_AREA_SIZE = 70  # pixels
 
 # UI Configuration
 CAPTURE_WINDOW_ALPHA = 0.1  # Semi-transparent - control frame visible, capture area distinguishable

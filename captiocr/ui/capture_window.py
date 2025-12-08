@@ -93,12 +93,8 @@ class CaptureWindow(BaseWindow):
         self.window.focus_force()
         self.window.bind_all('<Control-q>', lambda e: self._on_stop_clicked())
         
-        # Bind events to re-assert topmost when focus/visibility changes
-        for ev in ('<FocusOut>', '<Map>', '<Configure>'):
-            self.window.bind(ev, lambda e: self._raise_topmost())
-        
-        # Windows 11 workaround: start periodic topmost refresh
-        self.window.after(500, self._refresh_topmost)
+        # Windows 11 workaround: start periodic topmost refresh (removed event bindings that caused infinite loops)
+        self.window.after(2000, self._refresh_topmost)
         
         self.logger.info(f"Capture window shown at {screen_x},{window_y} size {screen_width}x{total_height}")
     
@@ -245,24 +241,13 @@ class CaptureWindow(BaseWindow):
         if self._window_exists() and hasattr(self, 'status_label'):
             self.status_label.config(text=text)
     
-    def _raise_topmost(self) -> None:
-        """Re-assert topmost when triggered by events."""
-        if self._window_exists():
-            try:
-                self.window.attributes('-topmost', True)
-                self.window.lift()
-            except Exception:
-                pass
-    
     def _refresh_topmost(self) -> None:
         """Periodically refresh topmost status to handle Windows 11 issues."""
         if self._window_exists():
             try:
-                # Flip trick: toggle topmost to force Windows z-order recalculation
-                self.window.attributes('-topmost', False)
+                # Simply re-assert topmost without the flip trick (which can cause issues)
                 self.window.attributes('-topmost', True)
-                self.window.lift()
-                # Schedule next refresh every 1500ms
-                self.window.after(1500, self._refresh_topmost)
+                # Schedule next refresh every 3000ms (less aggressive)
+                self.window.after(3000, self._refresh_topmost)
             except Exception:
                 pass
