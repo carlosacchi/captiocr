@@ -313,3 +313,256 @@ class IntervalConfigDialog(DialogBase):
             messagebox.showerror("Invalid Values", f"Please enter valid numbers: {e}")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save settings: {e}")
+
+
+class SensitivityConfigDialog(DialogBase):
+    """Dialog for configuring delta extraction sensitivity."""
+
+    def __init__(self, parent: tk.Tk, capture_config: CaptureConfig, settings=None):
+        """Initialize sensitivity configuration dialog."""
+        super().__init__(parent, "Configure Capture Sensitivity", 550, 650)
+        self.capture_config = capture_config
+        self.settings = settings
+
+    def show(self) -> None:
+        """Show the configuration dialog."""
+        # Create dialog using base class
+        self.create_dialog()
+
+        # Create main frame and title
+        frame = self.create_main_frame()
+        self.create_title_label(frame, "Configure Capture Sensitivity")
+
+        ttk.Label(
+            frame,
+            text="Adjust how the application detects and filters duplicate content",
+            font=("Arial", 9),
+            foreground="gray"
+        ).pack(pady=(0, 15))
+
+        # Minimum Delta Words
+        min_delta_frame = ttk.Frame(frame)
+        min_delta_frame.pack(fill=tk.X, pady=8)
+        ttk.Label(min_delta_frame, text="Minimum Delta Words:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.min_delta_var = tk.IntVar(value=self.capture_config.min_delta_words)
+        ttk.Spinbox(
+            min_delta_frame,
+            from_=2,
+            to=10,
+            increment=1,
+            textvariable=self.min_delta_var,
+            width=10
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            min_delta_frame,
+            text="⓵ Min words for new content",
+            font=("Arial", 8),
+            foreground="gray"
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(
+            frame,
+            text="   Lower = captures smaller fragments\n   Higher = filters out small changes",
+            font=("Arial", 8),
+            foreground="#555",
+            justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # Recent Texts Window Size
+        window_frame = ttk.Frame(frame)
+        window_frame.pack(fill=tk.X, pady=8)
+        ttk.Label(window_frame, text="Comparison Window:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.window_var = tk.IntVar(value=self.capture_config.recent_texts_window_size)
+        ttk.Spinbox(
+            window_frame,
+            from_=3,
+            to=10,
+            increment=1,
+            textvariable=self.window_var,
+            width=10
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            window_frame,
+            text="⓶ Previous captures to check",
+            font=("Arial", 8),
+            foreground="gray"
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(
+            frame,
+            text="   Lower = faster, may miss patterns\n   Higher = better redundancy detection",
+            font=("Arial", 8),
+            foreground="#555",
+            justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # Delta Buffer Threshold
+        buffer_frame = ttk.Frame(frame)
+        buffer_frame.pack(fill=tk.X, pady=8)
+        ttk.Label(buffer_frame, text="Buffer Flush Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.buffer_var = tk.IntVar(value=self.capture_config.delta_buffer_threshold)
+        ttk.Spinbox(
+            buffer_frame,
+            from_=2,
+            to=5,
+            increment=1,
+            textvariable=self.buffer_var,
+            width=10
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            buffer_frame,
+            text="⓷ Fragments before saving",
+            font=("Arial", 8),
+            foreground="gray"
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(
+            frame,
+            text="   Lower = more frequent saves\n   Higher = waits to combine fragments",
+            font=("Arial", 8),
+            foreground="#555",
+            justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # Incremental Threshold
+        threshold_frame = ttk.Frame(frame)
+        threshold_frame.pack(fill=tk.X, pady=8)
+        ttk.Label(threshold_frame, text="Incremental Detection:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.threshold_var = tk.IntVar(value=int(self.capture_config.incremental_threshold * 100))
+        ttk.Spinbox(
+            threshold_frame,
+            from_=50,
+            to=90,
+            increment=5,
+            textvariable=self.threshold_var,
+            width=10
+        ).pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            threshold_frame,
+            text="⓸ % overlap for subtitles",
+            font=("Arial", 8),
+            foreground="gray"
+        ).pack(side=tk.LEFT, padx=5)
+
+        ttk.Label(
+            frame,
+            text="   Lower = more sensitive to changes\n   Higher = stricter incremental detection",
+            font=("Arial", 8),
+            foreground="#555",
+            justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # Separator
+        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, pady=15)
+
+        # Info
+        ttk.Label(
+            frame,
+            text="💡 Tip: Start with defaults. Adjust if you see too many fragments or duplicates.",
+            font=("Arial", 9),
+            foreground="#0066cc",
+            justify=tk.CENTER
+        ).pack(pady=10)
+
+        # Buttons using base class
+        btn_frame = self.create_button_frame(frame)
+
+        # Add Reset to Defaults button on the left
+        ttk.Button(
+            btn_frame,
+            text="Reset to Defaults",
+            command=self._on_reset
+        ).pack(side=tk.LEFT, padx=5)
+
+        # Add spacer to push Save/Cancel to the right
+        ttk.Frame(btn_frame).pack(side=tk.LEFT, expand=True)
+
+        self.add_ok_cancel_buttons(
+            btn_frame,
+            ok_text="Save",
+            ok_callback=self._on_save,
+            ok_width=12
+        )
+
+    def _on_reset(self) -> None:
+        """Reset all values to defaults."""
+        from ..config.constants import (
+            DEFAULT_MIN_DELTA_WORDS,
+            DEFAULT_RECENT_TEXTS_WINDOW_SIZE,
+            DEFAULT_DELTA_BUFFER_THRESHOLD,
+            DEFAULT_INCREMENTAL_THRESHOLD
+        )
+
+        self.min_delta_var.set(DEFAULT_MIN_DELTA_WORDS)
+        self.window_var.set(DEFAULT_RECENT_TEXTS_WINDOW_SIZE)
+        self.buffer_var.set(DEFAULT_DELTA_BUFFER_THRESHOLD)
+        self.threshold_var.set(int(DEFAULT_INCREMENTAL_THRESHOLD * 100))
+
+        messagebox.showinfo(
+            "Reset to Defaults",
+            "All values have been reset to default settings.\n"
+            "Click Save to apply these changes."
+        )
+
+    def _on_save(self) -> None:
+        """Handle save button click."""
+        try:
+            # Force update of all spinbox values to ensure they're captured
+            self.dialog.update_idletasks()
+
+            # Get values
+            new_min_delta = int(self.min_delta_var.get())
+            new_window = int(self.window_var.get())
+            new_buffer = int(self.buffer_var.get())
+            new_threshold = float(self.threshold_var.get()) / 100.0
+
+            # Validate values
+            if new_min_delta < 2 or new_min_delta > 10:
+                messagebox.showerror("Invalid Value", "Minimum delta words must be between 2 and 10")
+                return
+            if new_window < 3 or new_window > 10:
+                messagebox.showerror("Invalid Value", "Comparison window must be between 3 and 10")
+                return
+            if new_buffer < 2 or new_buffer > 5:
+                messagebox.showerror("Invalid Value", "Buffer threshold must be between 2 and 5")
+                return
+            if new_threshold < 0.5 or new_threshold > 0.9:
+                messagebox.showerror("Invalid Value", "Incremental threshold must be between 50% and 90%")
+                return
+
+            # Update configuration
+            self.capture_config.min_delta_words = new_min_delta
+            self.capture_config.recent_texts_window_size = new_window
+            self.capture_config.delta_buffer_threshold = new_buffer
+            self.capture_config.incremental_threshold = new_threshold
+
+            # Save settings to persist changes
+            save_success = False
+            if self.settings:
+                save_success = self.settings.save_last_config()
+                if not save_success:
+                    messagebox.showerror(
+                        "Save Error",
+                        "Failed to save settings to disk.\n"
+                        "Settings will be applied for this session only."
+                    )
+
+            # Show confirmation
+            save_msg = "Settings saved to disk." if save_success else "Settings applied (not saved to disk)."
+            messagebox.showinfo(
+                "Settings Updated",
+                f"Sensitivity updated:\n"
+                f"Min Delta Words: {new_min_delta}\n"
+                f"Comparison Window: {new_window}\n"
+                f"Buffer Threshold: {new_buffer}\n"
+                f"Incremental Detection: {int(new_threshold * 100)}%\n\n"
+                f"{save_msg}"
+            )
+
+            # Close the dialog using base class method
+            self.close_dialog()
+
+        except ValueError as e:
+            messagebox.showerror("Invalid Values", f"Please enter valid numbers: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {e}")

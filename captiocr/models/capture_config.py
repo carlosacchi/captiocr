@@ -8,22 +8,32 @@ import logging
 from ..config.constants import (
     DEFAULT_MIN_CAPTURE_INTERVAL,
     DEFAULT_MAX_CAPTURE_INTERVAL,
-    MAX_SIMILAR_CAPTURES
+    MAX_SIMILAR_CAPTURES,
+    DEFAULT_MIN_DELTA_WORDS,
+    DEFAULT_RECENT_TEXTS_WINDOW_SIZE,
+    DEFAULT_DELTA_BUFFER_THRESHOLD,
+    DEFAULT_INCREMENTAL_THRESHOLD
 )
 
 
 @dataclass
 class CaptureConfig:
     """Configuration for screen capture settings."""
-    
+
     min_capture_interval: float = DEFAULT_MIN_CAPTURE_INTERVAL
     max_capture_interval: float = DEFAULT_MAX_CAPTURE_INTERVAL
     current_interval: float = DEFAULT_MIN_CAPTURE_INTERVAL
     max_similar_captures: int = MAX_SIMILAR_CAPTURES
-    
+
+    # Delta extraction sensitivity parameters
+    min_delta_words: int = DEFAULT_MIN_DELTA_WORDS
+    recent_texts_window_size: int = DEFAULT_RECENT_TEXTS_WINDOW_SIZE
+    delta_buffer_threshold: int = DEFAULT_DELTA_BUFFER_THRESHOLD
+    incremental_threshold: float = DEFAULT_INCREMENTAL_THRESHOLD
+
     # Callbacks
     on_interval_change: Optional[Callable[[float], None]] = field(default=None, repr=False)
-    
+
     # Logger
     _logger: logging.Logger = field(default_factory=lambda: logging.getLogger('CaptiOCR.CaptureConfig'), repr=False)
     
@@ -168,20 +178,24 @@ class CaptureConfig:
     def to_dict(self) -> dict:
         """
         Convert settings to dictionary for serialization.
-        
+
         Returns:
             Dictionary representation
         """
         return {
             'min_capture_interval': self.min_capture_interval,
             'max_capture_interval': self.max_capture_interval,
-            'max_similar_captures': self.max_similar_captures
+            'max_similar_captures': self.max_similar_captures,
+            'min_delta_words': self.min_delta_words,
+            'recent_texts_window_size': self.recent_texts_window_size,
+            'delta_buffer_threshold': self.delta_buffer_threshold,
+            'incremental_threshold': self.incremental_threshold
         }
     
     def from_dict(self, config_dict: dict) -> None:
         """
         Load settings from dictionary.
-        
+
         Args:
             config_dict: Dictionary with configuration values
         """
@@ -190,6 +204,16 @@ class CaptureConfig:
                 config_dict['min_capture_interval'],
                 config_dict['max_capture_interval']
             )
-        
+
         if 'max_similar_captures' in config_dict:
             self.set_max_similar_captures(config_dict['max_similar_captures'])
+
+        # Load delta extraction sensitivity parameters
+        if 'min_delta_words' in config_dict:
+            self.min_delta_words = config_dict['min_delta_words']
+        if 'recent_texts_window_size' in config_dict:
+            self.recent_texts_window_size = config_dict['recent_texts_window_size']
+        if 'delta_buffer_threshold' in config_dict:
+            self.delta_buffer_threshold = config_dict['delta_buffer_threshold']
+        if 'incremental_threshold' in config_dict:
+            self.incremental_threshold = config_dict['incremental_threshold']

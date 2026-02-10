@@ -31,6 +31,12 @@ TEXT_SIMILARITY_THRESHOLD = 0.8
 MIN_TEXT_LENGTH = 10
 MIN_CAPTURE_AREA_SIZE = 70  # pixels
 
+# Delta Extraction Sensitivity Configuration
+DEFAULT_MIN_DELTA_WORDS = 5  # Minimum words for significant delta
+DEFAULT_RECENT_TEXTS_WINDOW_SIZE = 5  # Number of previous captures to compare
+DEFAULT_DELTA_BUFFER_THRESHOLD = 3  # Fragments to accumulate before flushing
+DEFAULT_INCREMENTAL_THRESHOLD = 0.7  # Percentage overlap for incremental detection (70%)
+
 # UI Configuration
 CAPTURE_WINDOW_ALPHA = 0.1  # Semi-transparent - control frame visible, capture area distinguishable
 CAPTURE_WINDOW_COLOR = 'white'  # Using white for transparent effect

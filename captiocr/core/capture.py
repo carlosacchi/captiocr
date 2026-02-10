@@ -19,7 +19,7 @@ from .ocr import OCRProcessor
 from .text_processor import TextProcessor
 from ..models.capture_config import CaptureConfig
 from ..utils.file_manager import FileManager
-from ..config.constants import TIMESTAMP_FORMAT
+from ..config.constants import TIMESTAMP_FORMAT, APP_VERSION
 from ..config.constants import CAPTURES_DIR, MONITOR_DISCONNECTION_CHECK_INTERVAL
 
 
@@ -108,7 +108,13 @@ class ScreenCapture:
         with open(self.output_file_path, 'w', encoding='utf-8') as f:
             f.write(f"Caption capture started: {datetime.now()}\n")
             f.write(f"Language: {language}\n")
-            f.write(f"Caption mode: {caption_mode}\n\n")
+            f.write(f"Caption mode: {caption_mode}\n")
+            f.write(f"Version: {APP_VERSION}\n")
+            f.write(f"\n--- Sensitivity Configuration ---\n")
+            f.write(f"Minimum Delta Words: {self.capture_config.min_delta_words}\n")
+            f.write(f"Comparison Window: {self.capture_config.recent_texts_window_size}\n")
+            f.write(f"Buffer Flush Threshold: {self.capture_config.delta_buffer_threshold}\n")
+            f.write(f"Incremental Detection: {int(self.capture_config.incremental_threshold * 100)}%\n\n")
         
         # Start capture thread
         self.capture_thread = threading.Thread(
@@ -148,13 +154,18 @@ class ScreenCapture:
     def _capture_loop(self, language: str, caption_mode: bool) -> None:
         """
         Main capture loop running in a separate thread.
-        
+
         Args:
             language: Language code for OCR
             caption_mode: Whether to use caption-optimized settings
         """
         try:
-            last_text = ""
+            # Keep a window of recent texts to catch A-B-A redundancy patterns
+            recent_texts = deque(maxlen=self.capture_config.recent_texts_window_size)
+
+            # Buffer for accumulating small deltas
+            delta_buffer = []
+
             similar_captures_count = 0
             capture_interval = self.capture_config.reset_interval()
             
@@ -227,36 +238,84 @@ class ScreenCapture:
                     )
                     self.logger.debug(f"Raw OCR result (length: {len(raw_text)}): '{raw_text[:100]}...'")
                     
-                    # Clean text
-                    text = self.text_processor.clean_text(raw_text)
-                    self.logger.debug(f"Cleaned text (length: {len(text)}): '{text[:100]}...'")
-                    
-                    # Check for significant new content
-                    has_new_content = self.text_processor.has_significant_new_content(text, last_text)
-                    self.logger.debug(f"Has significant new content: {has_new_content} (similarity threshold: {self.text_processor.similarity_threshold})")
-                    
-                    if text and has_new_content:
-                        # Save to file
-                        with open(self.output_file_path, 'a', encoding='utf-8') as f:
-                            timestamp = datetime.now().strftime('%H:%M:%S')
-                            f.write(f"[{timestamp}] {text}\n")
-                        
-                        # Update state
-                        last_text = text
-                        self.text_history.append(text)
-                        similar_captures_count = 0
-                        capture_interval = self.capture_config.reset_interval()
-                        
-                        # Notify callbacks
-                        if self.on_text_captured:
-                            self.on_text_captured(text)
-                        
-                        self.logger.debug(f"Captured text: {text[:50]}...")
+                    # Extract new content using delta extraction with window of recent texts
+                    new_content = self.text_processor.extract_new_content(
+                        raw_text,
+                        list(recent_texts),
+                        min_delta_words=self.capture_config.min_delta_words
+                    )
+                    self.logger.debug(
+                        f"Delta extraction result: "
+                        f"{'found' if new_content else 'no new content'} "
+                        f"(length: {len(new_content) if new_content else 0})"
+                    )
+
+                    if new_content:
+                        # Count words in new content
+                        word_count = len(new_content.split())
+
+                        # If delta is small (< min_delta_words), add to buffer instead of saving immediately
+                        if word_count < self.capture_config.min_delta_words:
+                            delta_buffer.append(new_content)
+                            self.logger.debug(
+                                f"Added to buffer ({word_count} words): '{new_content}' "
+                                f"(buffer size: {len(delta_buffer)})"
+                            )
+                        else:
+                            # Flush buffer if it has content
+                            content_to_save = new_content
+                            if delta_buffer:
+                                buffered_content = ' '.join(delta_buffer)
+                                content_to_save = f"{buffered_content} {new_content}"
+                                self.logger.debug(
+                                    f"Flushing buffer with {len(delta_buffer)} fragments"
+                                )
+                                delta_buffer.clear()
+
+                            # Save to file
+                            with open(self.output_file_path, 'a', encoding='utf-8') as f:
+                                timestamp = datetime.now().strftime('%H:%M:%S')
+                                f.write(f"[{timestamp}] {content_to_save}\n")
+
+                            self.text_history.append(content_to_save)
+                            similar_captures_count = 0
+                            capture_interval = self.capture_config.reset_interval()
+
+                            # Notify callbacks with the content (including buffer)
+                            if self.on_text_captured:
+                                self.on_text_captured(content_to_save)
+
+                            self.logger.debug(f"Captured new content: {content_to_save[:50]}...")
+
+                        # Always update recent_texts window with full cleaned text
+                        full_text = self.text_processor.clean_text(raw_text)
+                        recent_texts.appendleft(full_text)
                     else:
-                        # Adjust interval for repeated content
-                        similar_captures_count += 1
-                        if similar_captures_count > self.capture_config.max_similar_captures:
-                            capture_interval = self.capture_config.increase_interval()
+                        # No new content - check if we should flush buffer anyway
+                        if len(delta_buffer) >= self.capture_config.delta_buffer_threshold:
+                            # Enough fragments accumulated - flush buffer
+                            buffered_content = ' '.join(delta_buffer)
+                            with open(self.output_file_path, 'a', encoding='utf-8') as f:
+                                timestamp = datetime.now().strftime('%H:%M:%S')
+                                f.write(f"[{timestamp}] {buffered_content}\n")
+
+                            self.logger.debug(
+                                f"Flushed buffer after no new content "
+                                f"({len(delta_buffer)} fragments)"
+                            )
+
+                            self.text_history.append(buffered_content)
+                            if self.on_text_captured:
+                                self.on_text_captured(buffered_content)
+
+                            delta_buffer.clear()
+                            similar_captures_count = 0
+                            capture_interval = self.capture_config.reset_interval()
+                        else:
+                            # Adjust interval for repeated content
+                            similar_captures_count += 1
+                            if similar_captures_count > self.capture_config.max_similar_captures:
+                                capture_interval = self.capture_config.increase_interval()
                     
                     # Sleep based on current interval
                     time.sleep(capture_interval)
@@ -377,7 +436,12 @@ class ScreenCapture:
                     text_blocks.append((timestamp, text))
             
             # Filter duplicates
-            unique_blocks = self.text_processor.filter_duplicate_blocks(text_blocks)
+            unique_blocks = self.text_processor.filter_duplicate_blocks(
+                text_blocks,
+                min_delta_words=self.capture_config.min_delta_words,
+                window_size=self.capture_config.recent_texts_window_size,
+                buffer_threshold=self.capture_config.delta_buffer_threshold
+            )
             
             # Create processed filename
             timestamp = self.current_capture_timestamp or datetime.now().strftime(TIMESTAMP_FORMAT)

@@ -10,7 +10,7 @@ import keyboard
 from pathlib import Path
 from .selection_window import SelectionWindow
 from .capture_window import CaptureWindow
-from .dialogs import SettingsDialog, LanguageDownloadDialog, IntervalConfigDialog
+from .dialogs import SettingsDialog, LanguageDownloadDialog, IntervalConfigDialog, SensitivityConfigDialog
 from ..core.ocr import OCRProcessor
 from ..core.capture import ScreenCapture
 from ..core.text_processor import TextProcessor
@@ -94,7 +94,10 @@ class MainWindow:
         
         # Core components
         self.ocr_processor = OCRProcessor()
-        self.text_processor = TextProcessor(self.settings.text_similarity_threshold)
+        self.text_processor = TextProcessor(
+            self.settings.text_similarity_threshold,
+            self.settings.capture_config.incremental_threshold
+        )
         self.capture_config = self.settings.capture_config
         
         # Screen capture (will be updated with monitor manager after creation)
@@ -180,7 +183,11 @@ class MainWindow:
             label="Configure Capture Interval...",
             command=self._configure_interval
         )
-        
+        settings_menu.add_command(
+            label="Configure Capture Sensitivity...",
+            command=self._configure_sensitivity
+        )
+
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
@@ -658,10 +665,15 @@ class MainWindow:
         """Open interval configuration dialog."""
         dialog = IntervalConfigDialog(self.root, self.capture_config)
         dialog.show()
-        
+
         # Update interval display after dialog closes
         self.interval_status_var.set(f"Interval: {self.capture_config.min_capture_interval:.1f}s")
-    
+
+    def _configure_sensitivity(self) -> None:
+        """Open sensitivity configuration dialog."""
+        dialog = SensitivityConfigDialog(self.root, self.capture_config, self.settings)
+        dialog.show()
+
     def _save_settings(self) -> None:
         """Save current settings."""
         profile_name = simpledialog.askstring(
