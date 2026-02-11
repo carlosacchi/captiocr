@@ -1,4 +1,4 @@
-0.13.3
+0.13.4
 10/02/2026
 CaptiOCR
 Author: Carlo Sacchi
