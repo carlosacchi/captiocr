@@ -51,9 +51,9 @@ class AppInfo:
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 self._info = json.load(f)
-            print(f"Loaded app info from: {path}")
+            # Successfully loaded app info from JSON
         except Exception as e:
-            print(f"Error loading JSON config: {e}")
+            # Failed to load JSON config, using defaults
             self._set_defaults()
     
     def _load_from_txt(self, path: Path):
@@ -86,11 +86,11 @@ class AppInfo:
                     self._info['url'] = line.replace('Website:', '').strip()
                 elif line.startswith('Email:'):
                     self._info['email'] = line.replace('Email:', '').strip()
-            
-            print(f"Loaded app info from: {path}")
-            print(f"Parsed: {self._info}")
+
+
+            # Successfully loaded app info from TXT
         except Exception as e:
-            print(f"Error loading TXT config: {e}")
+            # Failed to load TXT config, using defaults
             self._set_defaults()
     
     def _set_defaults(self):

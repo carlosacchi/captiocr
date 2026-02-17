@@ -115,12 +115,14 @@ class MonitorManager:
         try:
             # Temporarily set DPI awareness just for monitor detection
             # First enumerate monitors without DPI awareness to get correct positions
+            # Define proper Win32 callback signature for EnumDisplayMonitors
+            # BOOL CALLBACK MonitorEnumProc(HMONITOR hMonitor, HDC hdcMonitor, LPRECT lprcMonitor, LPARAM dwData)
             MonitorEnumProc = ctypes.WINFUNCTYPE(
                 ctypes.c_bool,
-                ctypes.c_ulong,
-                ctypes.c_ulong,
-                ctypes.POINTER(ctypes.wintypes.RECT),
-                ctypes.c_double
+                ctypes.wintypes.HANDLE,  # HMONITOR (pointer-sized)
+                ctypes.wintypes.HDC,     # HDC (pointer-sized)
+                ctypes.POINTER(ctypes.wintypes.RECT),  # LPRECT
+                ctypes.wintypes.LPARAM   # LPARAM (pointer-sized)
             )
             
             # Callback function

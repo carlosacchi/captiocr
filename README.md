@@ -4,7 +4,7 @@
 
 **CaptiOCR** is an open-source **real-time screen text extraction tool** designed to capture and transcribe captions (subtitles) from video conferencing applications like **Microsoft Teams**, **Zoom**, and **Google Meet**. With an intuitive interface and powerful OCR capabilities, you can select any screen area and extract text continuously in real-time.
 
-🚀 **Latest Version: 0.12.00** - Now with comprehensive **multi-monitor support** and **DPI awareness**!
+🚀 **Latest Version: 0.14.0** - Major security and quality improvements!
 
 ---
 
@@ -26,7 +26,7 @@
 ## 🛠️ Prerequisites
 
 Before installation, ensure you have:
-- ✅ **Python 3.8+** installed  
+- ✅ **Python 3.9+** installed  
 - ✅ **Tesseract OCR** installed ([Download here](https://github.com/tesseract-ocr/tesseract))  
 - ✅ **Windows OS** (primary support)  
 
@@ -212,9 +212,9 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 ## 👤 Author & Support
 
-**Author:** Carlo Sacchi  
-**Website:** [https://www.captiocr.com](https://www.captiocr.com)  
-**Version:** 0.12.00 (August 2025)
+**Author:** Carlo Sacchi
+**Website:** [https://www.captiocr.com](https://www.captiocr.com)
+**Version:** 0.14.0 (February 2026)
 
 For support, feature requests, or bug reports, please open an issue on GitHub.
 

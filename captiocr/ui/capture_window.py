@@ -24,15 +24,7 @@ class CaptureWindow(BaseWindow):
         # Callbacks
         self.on_stop: Optional[Callable[[], None]] = None
         self.on_position_changed: Optional[Callable[[Tuple[int,int,int,int]],None]] = None
-    
-    def _detect_dpi_scaling(self) -> float:
-        """Detect screen DPI scaling factor."""
-        try:
-            scale = self.parent.tk.call('tk', 'scaling')
-            return scale / 96.0 if scale > 0 else 1.0
-        except:
-            return 1.0
-    
+
     def show(self) -> None:
         """Show the capture window."""
         # Create window
@@ -59,16 +51,11 @@ class CaptureWindow(BaseWindow):
         
         # Position the window so control frame is above the original capture area
         window_y = screen_y - control_frame_height
-        
-        print(f"=== CAPTURE WINDOW DEBUG ===")
-        print(f"Original selection: {self.capture_area}")
-        print(f"Selection size: {screen_width} x {screen_height}")
-        print(f"Control frame height: {control_frame_height}")
-        print(f"Total window size: {screen_width} x {total_height}")
-        print(f"Window position: {screen_x}, {window_y}")
-        print(f"Expected capture area: {screen_x}, {screen_y}, {screen_x + screen_width}, {screen_y + screen_height}")
-        print(f"Scale factor: {self.scale_factor} (not applied due to DPI awareness)")
-        
+
+        self.logger.debug(f"Capture window: selection={self.capture_area}, size={screen_width}x{screen_height}, "
+                         f"control_height={control_frame_height}, total={screen_width}x{total_height}, "
+                         f"position=({screen_x},{window_y}), scale={self.scale_factor}")
+
         # Set geometry - window extends above the original capture area
         self.window.geometry(f"{screen_width}x{total_height}+{screen_x}+{window_y}")
         

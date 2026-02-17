@@ -40,18 +40,39 @@ class Settings:
     def _ensure_config_dir(self) -> None:
         """Ensure configuration directory exists."""
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    
+
+    def _sanitize_profile_name(self, profile_name: str) -> str:
+        """
+        Sanitize profile name to prevent path traversal attacks.
+
+        Args:
+            profile_name: User-provided profile name
+
+        Returns:
+            Sanitized profile name safe for filesystem use
+        """
+        import re
+        # Remove any path separators and parent directory references
+        sanitized = profile_name.replace('\\', '_').replace('/', '_').replace('..', '_')
+        # Only allow alphanumeric, underscore, and hyphen
+        sanitized = re.sub(r'[^\w\-]', '_', sanitized)
+        # Ensure it's not empty
+        if not sanitized or sanitized == '_':
+            sanitized = 'default'
+        return sanitized
+
     def get_profile_path(self, profile_name: str = "default") -> Path:
         """
         Get path to a settings profile file.
-        
+
         Args:
             profile_name: Name of the profile
-            
+
         Returns:
             Path to profile file
         """
-        return CONFIG_DIR / f"{profile_name}_preferences.json"
+        sanitized_name = self._sanitize_profile_name(profile_name)
+        return CONFIG_DIR / f"{sanitized_name}_preferences.json"
     
     def update_monitor_config(self, monitor_manager) -> None:
         """

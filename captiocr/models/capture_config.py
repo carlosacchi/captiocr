@@ -194,7 +194,7 @@ class CaptureConfig:
     
     def from_dict(self, config_dict: dict) -> None:
         """
-        Load settings from dictionary.
+        Load settings from dictionary with validation.
 
         Args:
             config_dict: Dictionary with configuration values
@@ -208,12 +208,35 @@ class CaptureConfig:
         if 'max_similar_captures' in config_dict:
             self.set_max_similar_captures(config_dict['max_similar_captures'])
 
-        # Load delta extraction sensitivity parameters
+        # Load and validate delta extraction sensitivity parameters
         if 'min_delta_words' in config_dict:
-            self.min_delta_words = config_dict['min_delta_words']
+            value = config_dict['min_delta_words']
+            if isinstance(value, int) and 1 <= value <= 100:
+                self.min_delta_words = value
+            else:
+                self._logger.warning(f"Invalid min_delta_words value: {value}, using default")
+                self.min_delta_words = DEFAULT_MIN_DELTA_WORDS
+
         if 'recent_texts_window_size' in config_dict:
-            self.recent_texts_window_size = config_dict['recent_texts_window_size']
+            value = config_dict['recent_texts_window_size']
+            if isinstance(value, int) and 1 <= value <= 50:
+                self.recent_texts_window_size = value
+            else:
+                self._logger.warning(f"Invalid recent_texts_window_size value: {value}, using default")
+                self.recent_texts_window_size = DEFAULT_RECENT_TEXTS_WINDOW_SIZE
+
         if 'delta_buffer_threshold' in config_dict:
-            self.delta_buffer_threshold = config_dict['delta_buffer_threshold']
+            value = config_dict['delta_buffer_threshold']
+            if isinstance(value, int) and 1 <= value <= 20:
+                self.delta_buffer_threshold = value
+            else:
+                self._logger.warning(f"Invalid delta_buffer_threshold value: {value}, using default")
+                self.delta_buffer_threshold = DEFAULT_DELTA_BUFFER_THRESHOLD
+
         if 'incremental_threshold' in config_dict:
-            self.incremental_threshold = config_dict['incremental_threshold']
+            value = config_dict['incremental_threshold']
+            if isinstance(value, (int, float)) and 0.0 <= value <= 1.0:
+                self.incremental_threshold = float(value)
+            else:
+                self._logger.warning(f"Invalid incremental_threshold value: {value}, using default")
+                self.incremental_threshold = DEFAULT_INCREMENTAL_THRESHOLD

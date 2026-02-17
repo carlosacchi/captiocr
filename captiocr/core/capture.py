@@ -130,24 +130,34 @@ class ScreenCapture:
     def stop_capture(self) -> Optional[str]:
         """
         Stop the capture process.
-        
+
         Returns:
             Path to the captured file or None
         """
         self.logger.info("Stopping capture...")
-        
+
         # Set stop flags
         self.capture_stop_flag = True
         self.stop_event.set()
-        
-        # Wait for thread to finish
+
+        # Wait for thread to finish with a longer timeout to ensure clean shutdown
         if self.capture_thread and self.capture_thread.is_alive():
-            self.capture_thread.join(timeout=2.0)
+            self.logger.debug("Waiting for capture thread to finish...")
+            self.capture_thread.join(timeout=5.0)
             if self.capture_thread.is_alive():
-                self.logger.warning("Capture thread did not terminate in time")
-        
+                self.logger.error("Capture thread did not terminate in time - file may be incomplete")
+                # Thread is still running, return None to signal the caller not to process the file
+                self.capture_thread = None
+                return None
+
         self.capture_thread = None
-        
+
+        # Ensure output file is fully written before returning
+        import time
+        if self.output_file_path and self.output_file_path.exists():
+            time.sleep(0.5)  # Brief delay to ensure file is flushed to disk
+            self.logger.info(f"Capture stopped successfully, file: {self.output_file_path}")
+
         # Return the output file path
         return str(self.output_file_path) if self.output_file_path else None
     
@@ -168,14 +178,7 @@ class ScreenCapture:
 
             similar_captures_count = 0
             capture_interval = self.capture_config.reset_interval()
-            
-            # Start keyboard monitoring thread
-            stop_key_thread = threading.Thread(
-                target=self._monitor_stop_key,
-                daemon=True
-            )
-            stop_key_thread.start()
-            
+
             while not self.capture_stop_flag:
                 try:
                     # Validate capture area (check for monitor disconnection)
@@ -331,17 +334,6 @@ class ScreenCapture:
             if self.on_status_update:
                 self.on_status_update(f"Capture error: {str(e)}")
     
-    def _monitor_stop_key(self) -> None:
-        """Monitor for stop key press (Ctrl+Q)."""
-        try:
-            while not self.stop_event.is_set():
-                if keyboard.is_pressed('ctrl+q'):
-                    self.logger.info("Stop key pressed (Ctrl+Q)")
-                    self.capture_stop_flag = True
-                    break
-                time.sleep(0.1)
-        except Exception as e:
-            self.logger.error(f"Error monitoring stop key: {e}")
     
     def _validate_capture_area(self) -> bool:
         """

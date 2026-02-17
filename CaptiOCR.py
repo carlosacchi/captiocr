@@ -26,24 +26,28 @@ def main():
         
     except Exception as e:
         # Show error dialog
+        error_message = f"Failed to start CaptiOCR:\n\n{str(e)}"
         try:
             import tkinter as tk
             from tkinter import messagebox
-            
+
             root = tk.Tk()
             root.withdraw()
-            messagebox.showerror(
-                "CaptiOCR Error",
-                f"Failed to start CaptiOCR:\n\n{str(e)}"
-            )
+            messagebox.showerror("CaptiOCR Error", error_message)
             root.destroy()
-        except:
+        except Exception as dialog_error:
             # If dialog fails, create error file
             try:
+                import traceback
                 with open("captiocr_error.txt", "w") as f:
-                    f.write(f"CaptiOCR Error: {str(e)}")
-            except:
-                pass
+                    f.write(f"CaptiOCR Error: {str(e)}\n\n")
+                    f.write(f"Traceback:\n{traceback.format_exc()}\n\n")
+                    f.write(f"Dialog error: {str(dialog_error)}\n")
+                print(f"Error logged to captiocr_error.txt: {error_message}", file=sys.stderr)
+            except Exception as file_error:
+                # Last resort - print to stderr
+                print(f"CRITICAL ERROR: {error_message}", file=sys.stderr)
+                print(f"Could not create error file: {file_error}", file=sys.stderr)
 
 if __name__ == "__main__":
     main()

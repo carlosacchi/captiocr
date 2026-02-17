@@ -35,8 +35,7 @@ class MainWindow:
         # Create root window
         self.root = tk.Tk()
         self.root.title(app_info.app_name)
-        version_label = ttk.Label(text=f"Version {app_info.version}")
-        
+
         # Initialize components
         self._init_components()
         self._init_variables()
@@ -823,24 +822,31 @@ CaptiOCR Instructions:
     def on_closing(self) -> None:
         """Handle window closing."""
         self.logger.info("Application closing")
-        
+
         try:
             # Stop any active capture
             if self.is_capturing:
                 self._stop_capture()
-            
+
+            # Clean up global hotkeys
+            try:
+                keyboard.unhook_all()
+                self.logger.info("Global hotkeys cleaned up")
+            except Exception as e:
+                self.logger.warning(f"Error cleaning up hotkeys: {e}")
+
             # Save current settings as last configuration
             self.settings.save_last_config()
-            
+
             # Destroy windows
             if self.selection_window:
                 self.selection_window.destroy()
             if self.capture_window:
                 self.capture_window.destroy()
-            
+
             # Destroy main window
             self.root.destroy()
-            
+
         except Exception as e:
             self.logger.error(f"Error during shutdown: {e}")
             self.root.destroy()

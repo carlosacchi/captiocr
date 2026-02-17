@@ -120,11 +120,19 @@ class LanguageManager:
             if progress_callback:
                 progress_callback(f"Downloading {lang_code}.traineddata...")
             
-            # Download the file
+            # Download the file with timeout
             try:
-                urllib.request.urlretrieve(url, output_file)
+                # Open URL with timeout
+                with urllib.request.urlopen(url, timeout=300) as response:
+                    # Read and write data in chunks to show progress
+                    file_data = response.read()
+                    with open(output_file, 'wb') as f:
+                        f.write(file_data)
             except urllib.error.HTTPError as e:
                 self.logger.error(f"HTTP error downloading {lang_code}: {e.code} - {e.reason}")
+                return False
+            except urllib.error.URLError as e:
+                self.logger.error(f"Network error downloading {lang_code}: {e}")
                 return False
             except Exception as e:
                 self.logger.error(f"Error downloading {lang_code}: {e}")

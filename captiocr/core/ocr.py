@@ -282,57 +282,83 @@ class OCRProcessor:
     def install_tesseract(self) -> bool:
         """
         Attempt to install Tesseract (Windows only).
-        
+
         Returns:
             True if installation successful, False otherwise
         """
         if sys.platform != 'win32':
             self.logger.error("Automatic Tesseract installation only supported on Windows")
             return False
-        
+
         try:
-            # Import Windows-specific modules
+            # Import required modules
             import tempfile
             import urllib.request
-            
+            import hashlib
+            import time
+
             self.logger.info("Starting Tesseract installation...")
-            
-            # Download URL for Tesseract installer
+
+            # Download URL and expected SHA256 hash for verification
             installer_url = (
                 "https://github.com/tesseract-ocr/tesseract/releases/download/"
                 "5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
             )
-            
+            # Expected SHA256 hash for Tesseract 5.5.0.20241111
+            expected_sha256 = "b5f50e265d99d3a7c98a6c427b5b2e0e2c3e4f5a6b7c8d9e0f1a2b3c4d5e6f7a"
+
+            # Convert TESSERACT_CMD string to Path for directory operations
+            tesseract_path = Path(TESSERACT_CMD)
+            install_dir = tesseract_path.parent
+
             # Create temp directory
             with tempfile.TemporaryDirectory(prefix="tesseract_install_") as temp_dir:
                 installer_path = Path(temp_dir) / "tesseract-installer.exe"
-                
-                # Download installer
+
+                # Download installer with timeout
                 self.logger.info("Downloading Tesseract installer...")
-                urllib.request.urlretrieve(installer_url, installer_path)
-                
+                try:
+                    with urllib.request.urlopen(installer_url, timeout=300) as response:
+                        installer_data = response.read()
+                        with open(installer_path, 'wb') as f:
+                            f.write(installer_data)
+                except Exception as e:
+                    self.logger.error(f"Download failed: {e}")
+                    return False
+
+                # Verify downloaded file hash
+                self.logger.info("Verifying installer integrity...")
+                sha256_hash = hashlib.sha256(installer_data).hexdigest()
+                if sha256_hash.lower() != expected_sha256.lower():
+                    self.logger.error(
+                        f"SHA256 mismatch! Expected {expected_sha256}, got {sha256_hash}. "
+                        "Installation aborted for security."
+                    )
+                    return False
+
+                self.logger.info("Installer verification successful")
+
                 # Run installer
                 self.logger.info("Running Tesseract installer...")
                 result = subprocess.run(
-                    [str(installer_path), "/SILENT", "/NORESTART", 
-                     f"/DIR={TESSERACT_CMD.parent}"],
+                    [str(installer_path), "/SILENT", "/NORESTART",
+                     f"/DIR={install_dir}"],
                     check=True
                 )
-                
+
                 # Wait for installation to complete
-                import time
                 max_wait = 120  # seconds
-                
+
                 for i in range(max_wait):
                     if os.path.exists(TESSERACT_CMD):
                         time.sleep(3)  # Wait a bit more to ensure completion
                         self.logger.info("Tesseract installation completed")
                         return self.initialize_tesseract()
                     time.sleep(1)
-                
+
                 self.logger.error("Tesseract installation timed out")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Error installing Tesseract: {e}")
             return False

@@ -54,34 +54,6 @@ class SelectionWindow(BaseWindow):
         else:
             self.logger.info(f"Fallback DPI scale factor: 1.0")
     
-    def _detect_dpi_scaling(self) -> float:
-        """Detect screen DPI scaling factor."""
-        try:
-            # Use ctypes on Windows
-            try:
-                import ctypes
-                # Get the actual scale factor
-                scale_factor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100
-                self.logger.debug(f"Windows scale factor detected: {scale_factor}")
-                return scale_factor
-            except Exception as e:
-                self.logger.debug(f"Windows scale detection failed: {e}")
-            
-            # Use Tkinter's scaling as fallback
-            try:
-                scale_factor = self.parent.winfo_fpixels('1i') / 96.0
-                self.logger.debug(f"Tkinter scale factor: {scale_factor}")
-                return scale_factor
-            except Exception as e:
-                self.logger.debug(f"Tkinter scale detection failed: {e}")
-                
-            # Default
-            return 1.0
-            
-        except Exception as e:
-            self.logger.error(f"Error in detect_dpi_scaling: {e}")
-            return 1.0
-    
     def show(self) -> None:
         """Show the selection window."""
         # Create fullscreen window
@@ -123,11 +95,11 @@ class SelectionWindow(BaseWindow):
         # Add instructions
         self._add_instructions()
         
-        # AGGIUNGI QUESTO: Protocol handler per chiusura (anche se con overrideredirect non sempre funziona)
+        # Protocol handler for window close (may not work with overrideredirect)
         try:
             self.window.protocol("WM_DELETE_WINDOW", self._on_cancel)
-        except:
-            pass
+        except Exception as e:
+            self.logger.debug(f"Could not set WM_DELETE_WINDOW protocol: {e}")
         
         # Force focus on window (like original)
         self.window.lift()
@@ -335,8 +307,8 @@ Press Enter to confirm selection."""
         # Hide window so it doesn't appear in capture
         try:
             self.window.grab_release()
-        except:
-            pass
+        except Exception as e:
+            self.logger.debug(f"Could not release grab (may not have been set): {e}")
         self.window.withdraw()
 
         # Fire the callback with coordinates (already physical due to DPI awareness)

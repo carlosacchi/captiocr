@@ -176,39 +176,60 @@ class LanguageDownloadDialog(BaseWindow):
         return self.download_success
     
     def _do_download(self, lang_code: str) -> None:
-        """Perform the actual download."""
+        """Perform the actual download in a background thread."""
+        import threading
+
         def progress_callback(message: str):
-            self.status_label.config(text=message)
-            self.window.update()
-        
-        # Download the language
-        success = self.language_manager.download_language(
-            lang_code,
-            TESSDATA_DIR,
-            progress_callback
-        )
-        
+            # Schedule UI update on main thread
+            self.window.after(0, lambda: self.status_label.config(text=message))
+
+        def download_thread():
+            """Background thread for downloading."""
+            try:
+                # Download the language
+                success = self.language_manager.download_language(
+                    lang_code,
+                    TESSDATA_DIR,
+                    progress_callback
+                )
+
+                # Schedule completion handling on main thread
+                self.window.after(0, lambda: self._on_download_complete(success, lang_code))
+
+            except Exception as e:
+                # Schedule error handling on main thread
+                self.window.after(0, lambda: self._on_download_error(str(e), lang_code))
+
+        # Start download in background thread
+        thread = threading.Thread(target=download_thread, daemon=True)
+        thread.start()
+
+    def _on_download_complete(self, success: bool, lang_code: str) -> None:
+        """Handle download completion on main thread."""
         if success:
             self.download_success = True
             self.status_label.config(text="Download complete!")
             self.progress_bar.stop()
-            
-            # Update window and close after delay (like original)
-            self.window.update()
+
+            # Close after delay
             self.parent.after(2000, self.window.destroy)
         else:
-            self.progress_bar.stop()
-            messagebox.showerror(
-                "Download Failed",
-                f"Failed to download {lang_code} language file"
-            )
-            # always release grab before destroying
-            try:
-                if self.window and self._window_exists():
-                    self.window.grab_release()
-                    self.window.destroy()
-            except Exception:
-                pass
+            self._on_download_error("Download failed", lang_code)
+
+    def _on_download_error(self, error_msg: str, lang_code: str) -> None:
+        """Handle download error on main thread."""
+        self.progress_bar.stop()
+        messagebox.showerror(
+            "Download Failed",
+            f"Failed to download {lang_code} language file: {error_msg}"
+        )
+        # Always release grab before destroying
+        try:
+            if self.window and self._window_exists():
+                self.window.grab_release()
+                self.window.destroy()
+        except Exception:
+            pass
     
 
 class IntervalConfigDialog(DialogBase):

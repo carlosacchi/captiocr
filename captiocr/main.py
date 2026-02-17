@@ -2,9 +2,7 @@
 Main entry point for CaptiOCR application.
 """
 import sys
-import logging
 import ctypes
-from pathlib import Path
 
 # Always use absolute imports for exe compatibility
 from captiocr.ui.main_window import MainWindow
@@ -61,15 +59,19 @@ def main():
             LoggerSetup()
             logger = get_logger('CaptiOCR.Main')
             logger.info(f"Starting {APP_NAME} v{APP_VERSION}")
-        except:
+        except Exception as log_error:
             # If logging fails, continue without it
+            print(f"Warning: Logging initialization failed: {log_error}", file=sys.stderr)
             logger = None
-        
+
         # Clean old log files (skip if fails)
         try:
             FileManager.clean_old_logs(keep_recent=20)
-        except:
-            pass
+        except Exception as clean_error:
+            if logger:
+                logger.warning(f"Failed to clean old logs: {clean_error}")
+            else:
+                print(f"Warning: Failed to clean old logs: {clean_error}", file=sys.stderr)
         
         # Create and run main window
         app = MainWindow()
@@ -80,30 +82,36 @@ def main():
         
     except Exception as e:
         # Always try to show error dialog
+        import traceback
         error_shown = False
+        error_details = (
+            f"Failed to start CaptiOCR:\n\n{str(e)}\n\n"
+            f"Error type: {type(e).__name__}"
+        )
+
         try:
             import tkinter as tk
             from tkinter import messagebox
-            
+
             root = tk.Tk()
             root.withdraw()
-            messagebox.showerror(
-                "CaptiOCR Error",
-                f"Failed to start CaptiOCR:\n\n{str(e)}\n\n"
-                f"Error type: {type(e).__name__}"
-            )
+            messagebox.showerror("CaptiOCR Error", error_details)
             root.destroy()
             error_shown = True
-        except:
-            pass
-        
-        # If dialog failed, create error file
-        if not error_shown:
-            try:
-                with open("captiocr_main_error.txt", "w") as f:
-                    f.write(f"CaptiOCR Main Error: {str(e)}\nType: {type(e).__name__}")
-            except:
-                pass
+        except Exception as dialog_error:
+            print(f"Error showing dialog: {dialog_error}", file=sys.stderr)
+
+        # If dialog failed or succeeded, always create error file for debugging
+        try:
+            with open("captiocr_main_error.txt", "w") as f:
+                f.write(f"CaptiOCR Main Error: {str(e)}\n")
+                f.write(f"Type: {type(e).__name__}\n\n")
+                f.write(f"Traceback:\n{traceback.format_exc()}\n")
+            if not error_shown:
+                print(f"Error details written to captiocr_main_error.txt", file=sys.stderr)
+        except Exception as file_error:
+            print(f"CRITICAL: Could not write error file: {file_error}", file=sys.stderr)
+            print(f"Original error: {error_details}", file=sys.stderr)
 
 
 if __name__ == "__main__":
