@@ -86,18 +86,17 @@ class BaseWindow:
         
         if self.window and self._window_exists():
             try:
-                # Unbind all events
-                for event in self.window.bind():
-                    self.window.unbind(event)
-                
-                # Destroy all children
-                for widget in self.window.winfo_children():
-                    widget.destroy()
-                
-                # Destroy the window
+                # Best-effort unbind — do not let failures prevent destroy
+                try:
+                    for event in self.window.bind():
+                        self.window.unbind(event)
+                except Exception:
+                    pass
+
+                # Destroy the window (this also destroys all children)
                 self.window.destroy()
                 self.logger.debug(f"Window destroyed: {self.title}")
-                
+
             except Exception as e:
                 self.logger.error(f"Error destroying window: {e}")
             finally:

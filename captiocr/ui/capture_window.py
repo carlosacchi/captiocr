@@ -76,9 +76,8 @@ class CaptureWindow(BaseWindow):
         self.window.lift()
         self.window.attributes('-topmost', True)
         
-        # Focus and bind hotkeys
+        # Focus
         self.window.focus_force()
-        self.window.bind_all('<Control-q>', lambda e: self._on_stop_clicked())
         
         # Windows 11 workaround: start periodic topmost refresh (removed event bindings that caused infinite loops)
         self.window.after(2000, self._refresh_topmost)
@@ -138,8 +137,7 @@ class CaptureWindow(BaseWindow):
             width = self.capture_frame.winfo_width()
             height = self.capture_frame.winfo_height()
             
-            print(f"=== CAPTURE FRAME DEBUG ===")
-            print(f"Capture frame canvas size: {width} x {height}")
+            self.logger.debug(f"Capture frame canvas size: {width} x {height}")
             
             # Draw rectangle border (2 pixels from edge to ensure visibility)
             self.capture_frame.create_rectangle(

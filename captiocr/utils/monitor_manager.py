@@ -384,23 +384,32 @@ class MonitorManager:
     def validate_capture_area(self, capture_area: Tuple[int, int, int, int]) -> bool:
         """
         Validate that a capture area is still valid (monitor not disconnected).
-        
+
+        Checks whether the center of the capture area falls within the bounds
+        of any currently detected monitor. Unlike get_monitor_from_point (which
+        falls back to the primary monitor for general use), this method performs
+        a strict bounds check with no fallback.
+
         Args:
             capture_area: Tuple of (x1, y1, x2, y2)
-            
+
         Returns:
             True if area is still valid
         """
         if not capture_area or not self.monitors:
             return False
-        
+
         x1, y1, x2, y2 = capture_area
         center_x = (x1 + x2) // 2
         center_y = (y1 + y2) // 2
-        
-        # Check if center point is on any monitor
-        monitor = self.get_monitor_from_point(center_x, center_y)
-        return monitor is not None
+
+        # Strict bounds check: point must actually be inside a monitor
+        for monitor in self.monitors:
+            if (monitor.x <= center_x < monitor.x + monitor.width and
+                    monitor.y <= center_y < monitor.y + monitor.height):
+                return True
+
+        return False
     
     def get_monitor_count(self) -> int:
         """Get the number of detected monitors."""

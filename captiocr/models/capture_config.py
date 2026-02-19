@@ -12,7 +12,11 @@ from ..config.constants import (
     DEFAULT_MIN_DELTA_WORDS,
     DEFAULT_RECENT_TEXTS_WINDOW_SIZE,
     DEFAULT_DELTA_BUFFER_THRESHOLD,
-    DEFAULT_INCREMENTAL_THRESHOLD
+    DEFAULT_INCREMENTAL_THRESHOLD,
+    POST_PROCESS_SENTENCE_SIMILARITY,
+    POST_PROCESS_NOVELTY_THRESHOLD,
+    POST_PROCESS_MIN_SENTENCE_WORDS,
+    POST_PROCESS_GLOBAL_WINDOW_SIZE
 )
 
 
@@ -30,6 +34,12 @@ class CaptureConfig:
     recent_texts_window_size: int = DEFAULT_RECENT_TEXTS_WINDOW_SIZE
     delta_buffer_threshold: int = DEFAULT_DELTA_BUFFER_THRESHOLD
     incremental_threshold: float = DEFAULT_INCREMENTAL_THRESHOLD
+
+    # Post-processing deduplication parameters
+    post_process_sentence_similarity: float = POST_PROCESS_SENTENCE_SIMILARITY
+    post_process_novelty_threshold: float = POST_PROCESS_NOVELTY_THRESHOLD
+    post_process_min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS
+    post_process_global_window_size: int = POST_PROCESS_GLOBAL_WINDOW_SIZE
 
     # Callbacks
     on_interval_change: Optional[Callable[[float], None]] = field(default=None, repr=False)
@@ -189,7 +199,11 @@ class CaptureConfig:
             'min_delta_words': self.min_delta_words,
             'recent_texts_window_size': self.recent_texts_window_size,
             'delta_buffer_threshold': self.delta_buffer_threshold,
-            'incremental_threshold': self.incremental_threshold
+            'incremental_threshold': self.incremental_threshold,
+            'post_process_sentence_similarity': self.post_process_sentence_similarity,
+            'post_process_novelty_threshold': self.post_process_novelty_threshold,
+            'post_process_min_sentence_words': self.post_process_min_sentence_words,
+            'post_process_global_window_size': self.post_process_global_window_size
         }
     
     def from_dict(self, config_dict: dict) -> None:
@@ -240,3 +254,36 @@ class CaptureConfig:
             else:
                 self._logger.warning(f"Invalid incremental_threshold value: {value}, using default")
                 self.incremental_threshold = DEFAULT_INCREMENTAL_THRESHOLD
+
+        # Load and validate post-processing parameters
+        if 'post_process_sentence_similarity' in config_dict:
+            value = config_dict['post_process_sentence_similarity']
+            if isinstance(value, (int, float)) and 0.5 <= value <= 0.95:
+                self.post_process_sentence_similarity = float(value)
+            else:
+                self._logger.warning(f"Invalid post_process_sentence_similarity: {value}, using default")
+                self.post_process_sentence_similarity = POST_PROCESS_SENTENCE_SIMILARITY
+
+        if 'post_process_novelty_threshold' in config_dict:
+            value = config_dict['post_process_novelty_threshold']
+            if isinstance(value, (int, float)) and 0.05 <= value <= 0.5:
+                self.post_process_novelty_threshold = float(value)
+            else:
+                self._logger.warning(f"Invalid post_process_novelty_threshold: {value}, using default")
+                self.post_process_novelty_threshold = POST_PROCESS_NOVELTY_THRESHOLD
+
+        if 'post_process_min_sentence_words' in config_dict:
+            value = config_dict['post_process_min_sentence_words']
+            if isinstance(value, int) and 2 <= value <= 10:
+                self.post_process_min_sentence_words = value
+            else:
+                self._logger.warning(f"Invalid post_process_min_sentence_words: {value}, using default")
+                self.post_process_min_sentence_words = POST_PROCESS_MIN_SENTENCE_WORDS
+
+        if 'post_process_global_window_size' in config_dict:
+            value = config_dict['post_process_global_window_size']
+            if isinstance(value, int) and 10 <= value <= 100:
+                self.post_process_global_window_size = value
+            else:
+                self._logger.warning(f"Invalid post_process_global_window_size: {value}, using default")
+                self.post_process_global_window_size = POST_PROCESS_GLOBAL_WINDOW_SIZE

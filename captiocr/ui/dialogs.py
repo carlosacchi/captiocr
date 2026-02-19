@@ -179,9 +179,16 @@ class LanguageDownloadDialog(BaseWindow):
         """Perform the actual download in a background thread."""
         import threading
 
+        def _safe_after(callback):
+            """Schedule callback on main thread only if window still exists."""
+            try:
+                if self._window_exists():
+                    self.window.after(0, callback)
+            except Exception:
+                pass
+
         def progress_callback(message: str):
-            # Schedule UI update on main thread
-            self.window.after(0, lambda: self.status_label.config(text=message))
+            _safe_after(lambda: self.status_label.config(text=message))
 
         def download_thread():
             """Background thread for downloading."""
@@ -194,11 +201,11 @@ class LanguageDownloadDialog(BaseWindow):
                 )
 
                 # Schedule completion handling on main thread
-                self.window.after(0, lambda: self._on_download_complete(success, lang_code))
+                _safe_after(lambda: self._on_download_complete(success, lang_code))
 
             except Exception as e:
                 # Schedule error handling on main thread
-                self.window.after(0, lambda: self._on_download_error(str(e), lang_code))
+                _safe_after(lambda: self._on_download_error(str(e), lang_code))
 
         # Start download in background thread
         thread = threading.Thread(target=download_thread, daemon=True)
@@ -581,6 +588,193 @@ class SensitivityConfigDialog(DialogBase):
             )
 
             # Close the dialog using base class method
+            self.close_dialog()
+
+        except ValueError as e:
+            messagebox.showerror("Invalid Values", f"Please enter valid numbers: {e}")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save settings: {e}")
+
+
+class PostProcessConfigDialog(DialogBase):
+    """Dialog for configuring post-processing deduplication parameters."""
+
+    def __init__(self, parent: tk.Tk, capture_config: CaptureConfig, settings=None):
+        super().__init__(parent, "Configure Post-Processing", 550, 680)
+        self.capture_config = capture_config
+        self.settings = settings
+
+    def show(self) -> None:
+        """Show the post-processing configuration dialog."""
+        self.create_dialog()
+        frame = self.create_main_frame()
+        self.create_title_label(frame, "Configure Post-Processing")
+
+        ttk.Label(
+            frame,
+            text="Adjust how processed files deduplicate and filter captured text.",
+            font=("Arial", 9), foreground="gray"
+        ).pack(pady=(0, 15))
+
+        # --- Sentence Similarity ---
+        row1 = ttk.Frame(frame)
+        row1.pack(fill=tk.X, pady=8)
+        ttk.Label(row1, text="Sentence Similarity:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.similarity_var = tk.IntVar(
+            value=int(self.capture_config.post_process_sentence_similarity * 100))
+        ttk.Spinbox(row1, from_=50, to=95, increment=5,
+                    textvariable=self.similarity_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row1, text="% fuzzy match", font=("Arial", 8),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            frame,
+            text="   Lower = more aggressive duplicate removal, may drop valid variations\n"
+                 "   Higher = keeps more sentence variations, less deduplication",
+            font=("Arial", 8), foreground="#555", justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # --- Novelty Threshold ---
+        row2 = ttk.Frame(frame)
+        row2.pack(fill=tk.X, pady=8)
+        ttk.Label(row2, text="Novelty Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.novelty_var = tk.IntVar(
+            value=int(self.capture_config.post_process_novelty_threshold * 100))
+        ttk.Spinbox(row2, from_=5, to=50, increment=5,
+                    textvariable=self.novelty_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row2, text="% new content words", font=("Arial", 8),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            frame,
+            text="   Lower = keeps sentences even with few new words, more complete output\n"
+                 "   Higher = requires more unique words per sentence, stricter filtering",
+            font=("Arial", 8), foreground="#555", justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # --- Min Sentence Words ---
+        row3 = ttk.Frame(frame)
+        row3.pack(fill=tk.X, pady=8)
+        ttk.Label(row3, text="Min Sentence Words:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.min_words_var = tk.IntVar(
+            value=self.capture_config.post_process_min_sentence_words)
+        ttk.Spinbox(row3, from_=2, to=10, increment=1,
+                    textvariable=self.min_words_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row3, text="words minimum", font=("Arial", 8),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            frame,
+            text="   Lower = keeps short fragments (e.g. names, brief replies)\n"
+                 "   Higher = filters out short fragments, cleaner but may lose context",
+            font=("Arial", 8), foreground="#555", justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # --- Global Window Size ---
+        row4 = ttk.Frame(frame)
+        row4.pack(fill=tk.X, pady=8)
+        ttk.Label(row4, text="Global Window Size:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.window_var = tk.IntVar(
+            value=self.capture_config.post_process_global_window_size)
+        ttk.Spinbox(row4, from_=10, to=100, increment=10,
+                    textvariable=self.window_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row4, text="recent sentences", font=("Arial", 8),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            frame,
+            text="   Lower = shorter memory, faster processing, may miss distant duplicates\n"
+                 "   Higher = broader dedup scope, catches more repetitions across the file",
+            font=("Arial", 8), foreground="#555", justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 10))
+
+        # --- Separator and tip ---
+        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, pady=15)
+        ttk.Label(
+            frame,
+            text="Tip: These settings affect only post-processing of saved capture files.\n"
+                 "They do not change live capture behavior.",
+            font=("Arial", 9), foreground="#0066cc", justify=tk.CENTER
+        ).pack(pady=10)
+
+        # --- Buttons ---
+        btn_frame = self.create_button_frame(frame)
+        ttk.Button(btn_frame, text="Reset to Defaults",
+                   command=self._on_reset).pack(side=tk.LEFT, padx=5)
+        ttk.Frame(btn_frame).pack(side=tk.LEFT, expand=True)
+        self.add_ok_cancel_buttons(btn_frame, ok_text="Save",
+                                   ok_callback=self._on_save, ok_width=12)
+
+    def _on_reset(self) -> None:
+        """Reset all values to defaults."""
+        from ..config.constants import (
+            POST_PROCESS_SENTENCE_SIMILARITY,
+            POST_PROCESS_NOVELTY_THRESHOLD,
+            POST_PROCESS_MIN_SENTENCE_WORDS,
+            POST_PROCESS_GLOBAL_WINDOW_SIZE
+        )
+        self.similarity_var.set(int(POST_PROCESS_SENTENCE_SIMILARITY * 100))
+        self.novelty_var.set(int(POST_PROCESS_NOVELTY_THRESHOLD * 100))
+        self.min_words_var.set(POST_PROCESS_MIN_SENTENCE_WORDS)
+        self.window_var.set(POST_PROCESS_GLOBAL_WINDOW_SIZE)
+        messagebox.showinfo(
+            "Reset to Defaults",
+            "All values have been reset to default settings.\n"
+            "Click Save to apply these changes."
+        )
+
+    def _on_save(self) -> None:
+        """Validate and save post-processing settings."""
+        try:
+            self.dialog.update_idletasks()
+
+            new_similarity = float(self.similarity_var.get()) / 100.0
+            new_novelty = float(self.novelty_var.get()) / 100.0
+            new_min_words = int(self.min_words_var.get())
+            new_window = int(self.window_var.get())
+
+            # Validate ranges
+            if not (0.50 <= new_similarity <= 0.95):
+                messagebox.showerror("Invalid Value",
+                                     "Sentence Similarity must be between 50% and 95%.")
+                return
+            if not (0.05 <= new_novelty <= 0.50):
+                messagebox.showerror("Invalid Value",
+                                     "Novelty Threshold must be between 5% and 50%.")
+                return
+            if not (2 <= new_min_words <= 10):
+                messagebox.showerror("Invalid Value",
+                                     "Min Sentence Words must be between 2 and 10.")
+                return
+            if not (10 <= new_window <= 100):
+                messagebox.showerror("Invalid Value",
+                                     "Global Window Size must be between 10 and 100.")
+                return
+
+            # Apply to config
+            self.capture_config.post_process_sentence_similarity = new_similarity
+            self.capture_config.post_process_novelty_threshold = new_novelty
+            self.capture_config.post_process_min_sentence_words = new_min_words
+            self.capture_config.post_process_global_window_size = new_window
+
+            # Persist
+            save_success = False
+            if self.settings:
+                save_success = self.settings.save_last_config()
+                if not save_success:
+                    messagebox.showerror(
+                        "Save Error",
+                        "Failed to save settings to disk.\n"
+                        "Settings will be applied for this session only."
+                    )
+
+            save_msg = "Settings saved to disk." if save_success else "Settings applied (not saved to disk)."
+            messagebox.showinfo(
+                "Settings Updated",
+                f"Post-processing updated:\n"
+                f"Sentence Similarity: {int(new_similarity * 100)}%\n"
+                f"Novelty Threshold: {int(new_novelty * 100)}%\n"
+                f"Min Sentence Words: {new_min_words}\n"
+                f"Global Window Size: {new_window}\n\n"
+                f"{save_msg}"
+            )
+
             self.close_dialog()
 
         except ValueError as e:

@@ -37,6 +37,12 @@ DEFAULT_RECENT_TEXTS_WINDOW_SIZE = 5  # Number of previous captures to compare
 DEFAULT_DELTA_BUFFER_THRESHOLD = 3  # Fragments to accumulate before flushing
 DEFAULT_INCREMENTAL_THRESHOLD = 0.7  # Percentage overlap for incremental detection (70%)
 
+# Post-Processing Configuration (aggressive deduplication for processed files)
+POST_PROCESS_SENTENCE_SIMILARITY = 0.75  # Fuzzy match threshold for sentence-level dedup
+POST_PROCESS_NOVELTY_THRESHOLD = 0.15  # Min ratio of new content words vs total to keep a sentence
+POST_PROCESS_MIN_SENTENCE_WORDS = 3  # Minimum words for a sentence to be considered meaningful
+POST_PROCESS_GLOBAL_WINDOW_SIZE = 50  # Number of recent sentences to compare against globally
+
 # UI Configuration
 CAPTURE_WINDOW_ALPHA = 0.1  # Semi-transparent - control frame visible, capture area distinguishable
 CAPTURE_WINDOW_COLOR = 'white'  # Using white for transparent effect

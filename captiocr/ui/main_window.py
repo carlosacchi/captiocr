@@ -5,12 +5,11 @@ import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import re
 from typing import Optional
-import logging
 import keyboard
-from pathlib import Path
 from .selection_window import SelectionWindow
 from .capture_window import CaptureWindow
-from .dialogs import SettingsDialog, LanguageDownloadDialog, IntervalConfigDialog, SensitivityConfigDialog
+from .dialogs import (SettingsDialog, LanguageDownloadDialog, IntervalConfigDialog,
+                      SensitivityConfigDialog, PostProcessConfigDialog)
 from ..core.ocr import OCRProcessor
 from ..core.capture import ScreenCapture
 from ..core.text_processor import TextProcessor
@@ -49,13 +48,12 @@ class MainWindow:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
         
         self.logger.info("Main window initialized")
-        
-        # Bind Ctrl+Q sulla MainWindow per avviare la cattura
-        self.root.bind('<Control-q>', self._on_ctrl_q_toggle)
 
         try:
-            # this is global: works even when your Tk app is not focused
-            keyboard.add_hotkey('ctrl+q', self._on_ctrl_q_toggle)
+            # Global hotkey: works even when the Tk app is not focused.
+            # keyboard callbacks run on a background thread, so marshal to the
+            # Tk main thread via root.after to avoid race conditions.
+            keyboard.add_hotkey('ctrl+q', lambda: self.root.after(0, self._on_ctrl_q_toggle))
             self.logger.info("Registered global Ctrl+Q via keyboard.add_hotkey")
         except Exception as e:
             self.logger.error(f"Could not register global hotkey: {e}")
@@ -185,6 +183,10 @@ class MainWindow:
         settings_menu.add_command(
             label="Configure Capture Sensitivity...",
             command=self._configure_sensitivity
+        )
+        settings_menu.add_command(
+            label="Configure Post-Processing...",
+            command=self._configure_post_processing
         )
 
         # Help menu
@@ -336,11 +338,12 @@ class MainWindow:
             self.selected_lang.set(self.settings.language)
             self.debug_enabled.set(self.settings.debug_enabled)
             self.use_caption_mode.set(self.settings.use_caption_mode)
+            self.use_document_mode.set(not self.settings.use_caption_mode)
             self.text_processor.similarity_threshold = self.settings.text_similarity_threshold
-            
+
             # Apply debug mode
             self.settings.apply_debug_mode()
-            
+
             # Update interval display with loaded values
             self.interval_status_var.set(f"Interval: {self.settings.capture_config.min_capture_interval:.1f}s")
     
@@ -517,17 +520,22 @@ class MainWindow:
     def _process_capture_file(self, filepath: str) -> None:
         """Process the captured file."""
         try:
-            # Ask for custom name
-            custom_name = simpledialog.askstring(
-                "Save As",
-                "Enter a name for the captured file:",
-                parent=self.root
-            )
-            
-            # If user cancelled, don't process the file
-            if custom_name is None:
-                self.status_var.set("Save cancelled")
-                return
+            # Skip Save As dialog during shutdown to avoid blocking
+            if getattr(self, '_shutting_down', False):
+                self.logger.info("Shutdown in progress, processing file without prompt")
+                custom_name = None
+            else:
+                # Ask for custom name
+                custom_name = simpledialog.askstring(
+                    "Save As",
+                    "Enter a name for the captured file:",
+                    parent=self.root
+                )
+
+                # If user cancelled, don't process the file
+                if custom_name is None:
+                    self.status_var.set("Save cancelled")
+                    return
             
             if custom_name:
                 # Sanitize filename
@@ -673,6 +681,11 @@ class MainWindow:
         dialog = SensitivityConfigDialog(self.root, self.capture_config, self.settings)
         dialog.show()
 
+    def _configure_post_processing(self) -> None:
+        """Open post-processing configuration dialog."""
+        dialog = PostProcessConfigDialog(self.root, self.capture_config, self.settings)
+        dialog.show()
+
     def _save_settings(self) -> None:
         """Save current settings."""
         profile_name = simpledialog.askstring(
@@ -707,9 +720,10 @@ class MainWindow:
             self.selected_lang.set(self.settings.language)
             self.debug_enabled.set(self.settings.debug_enabled)
             self.use_caption_mode.set(self.settings.use_caption_mode)
+            self.use_document_mode.set(not self.settings.use_caption_mode)
             self.text_processor.similarity_threshold = self.settings.text_similarity_threshold
             self.settings.apply_debug_mode()
-            
+
             # Update capture configuration and sync intervals
             self.capture_config = self.settings.capture_config
             self.screen_capture.capture_config = self.capture_config
@@ -822,9 +836,10 @@ CaptiOCR Instructions:
     def on_closing(self) -> None:
         """Handle window closing."""
         self.logger.info("Application closing")
+        self._shutting_down = True
 
         try:
-            # Stop any active capture
+            # Stop any active capture (skip Save As dialog during shutdown)
             if self.is_capturing:
                 self._stop_capture()
 

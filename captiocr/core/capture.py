@@ -10,7 +10,6 @@ import logging
 
 try:
     from PIL import ImageGrab
-    import keyboard
 except ImportError as e:
     logging.error(f"Required package not found: {e}")
     raise
@@ -140,15 +139,12 @@ class ScreenCapture:
         self.capture_stop_flag = True
         self.stop_event.set()
 
-        # Wait for thread to finish with a longer timeout to ensure clean shutdown
+        # Wait for thread to finish
         if self.capture_thread and self.capture_thread.is_alive():
             self.logger.debug("Waiting for capture thread to finish...")
             self.capture_thread.join(timeout=5.0)
             if self.capture_thread.is_alive():
-                self.logger.error("Capture thread did not terminate in time - file may be incomplete")
-                # Thread is still running, return None to signal the caller not to process the file
-                self.capture_thread = None
-                return None
+                self.logger.warning("Capture thread did not terminate in time - file may be incomplete")
 
         self.capture_thread = None
 
@@ -320,15 +316,29 @@ class ScreenCapture:
                             if similar_captures_count > self.capture_config.max_similar_captures:
                                 capture_interval = self.capture_config.increase_interval()
                     
-                    # Sleep based on current interval
-                    time.sleep(capture_interval)
-                    
+                    # Sleep based on current interval, but wake immediately on stop signal
+                    self.stop_event.wait(timeout=capture_interval)
+
                 except Exception as e:
                     self.logger.error(f"Error in capture iteration: {e}")
-                    time.sleep(1)  # Sleep on error to avoid rapid loops
+                    self.stop_event.wait(timeout=1)  # Sleep on error to avoid rapid loops
             
+            # Flush any remaining buffered fragments before exiting
+            if delta_buffer:
+                buffered_content = ' '.join(delta_buffer)
+                try:
+                    with open(self.output_file_path, 'a', encoding='utf-8') as f:
+                        timestamp = datetime.now().strftime('%H:%M:%S')
+                        f.write(f"[{timestamp}] {buffered_content}\n")
+                    self.logger.info(f"Flushed {len(delta_buffer)} remaining buffer fragments on stop")
+                    if self.on_text_captured:
+                        self.on_text_captured(buffered_content)
+                except Exception as e:
+                    self.logger.error(f"Error flushing buffer on stop: {e}")
+                delta_buffer.clear()
+
             self.logger.info("Capture loop ended")
-            
+
         except Exception as e:
             self.logger.error(f"Critical error in capture loop: {e}")
             if self.on_status_update:
@@ -379,29 +389,62 @@ class ScreenCapture:
             self.logger.error(f"Error validating capture area: {e}")
             return True  # Continue on error to avoid disruption
     
+    def _extract_capture_metadata(self, lines: list) -> dict:
+        """
+        Extract metadata from the raw capture file header.
+
+        Args:
+            lines: All lines from the raw capture file
+
+        Returns:
+            Dictionary with metadata fields (capture_started, language, caption_mode, version)
+        """
+        metadata = {}
+        for line in lines:
+            line = line.strip()
+            if line.startswith("Caption capture started:"):
+                metadata['capture_started'] = line.split(":", 1)[1].strip()
+            elif line.startswith("Language:"):
+                metadata['language'] = line.split(":", 1)[1].strip()
+            elif line.startswith("Caption mode:"):
+                metadata['caption_mode'] = line.split(":", 1)[1].strip()
+            elif line.startswith("Version:"):
+                metadata['capture_version'] = line.split(":", 1)[1].strip()
+            # Stop parsing header after first timestamp block
+            if line.startswith('[') and len(line) > 1 and line[1:3].isdigit():
+                break
+        return metadata
+
     def process_capture_file(self, filepath: str, custom_name: Optional[str] = None) -> Optional[str]:
         """
-        Post-process a capture file to remove duplicates.
-        
+        Post-process a capture file with aggressive deduplication.
+
+        Uses sentence-level deduplication, OCR artifact removal, and novelty ratio
+        filtering to produce a clean transcription from the raw capture file.
+        The processed file includes a metadata header with version and capture info.
+
         Args:
             filepath: Path to the capture file
             custom_name: Optional custom name for the processed file
-            
+
         Returns:
             Path to the processed file or None
         """
         try:
             self.logger.info(f"Processing capture file: {filepath}")
-            
+
             # Read the file
             with open(filepath, 'r', encoding='utf-8') as f:
                 lines = f.readlines()
-            
+
+            # Extract metadata from raw file header
+            metadata = self._extract_capture_metadata(lines)
+
             # Extract timestamp blocks
             blocks = []
             current_block = []
             timestamp_pattern = r'^\[\d{2}:\d{2}:\d{2}\]'
-            
+
             import re
             for line in lines:
                 if re.match(timestamp_pattern, line):
@@ -410,15 +453,15 @@ class ScreenCapture:
                     current_block = [line]
                 elif current_block:
                     current_block.append(line)
-            
+
             if current_block:
                 blocks.append(current_block)
-            
+
             # Filter duplicates
             if not blocks:
                 self.logger.warning("No text blocks found in capture file")
                 return None
-            
+
             # Convert blocks to (timestamp, text) tuples
             text_blocks = []
             for block in blocks:
@@ -426,34 +469,48 @@ class ScreenCapture:
                     timestamp = block[0].split(']')[0] + ']'
                     text = ''.join(block).replace(timestamp, '').strip()
                     text_blocks.append((timestamp, text))
-            
-            # Filter duplicates
-            unique_blocks = self.text_processor.filter_duplicate_blocks(
+
+            # Use aggressive post-processing for sentence-level deduplication
+            unique_blocks = self.text_processor.filter_duplicate_blocks_aggressive(
                 text_blocks,
-                min_delta_words=self.capture_config.min_delta_words,
-                window_size=self.capture_config.recent_texts_window_size,
-                buffer_threshold=self.capture_config.delta_buffer_threshold
+                sentence_similarity=self.capture_config.post_process_sentence_similarity,
+                novelty_threshold=self.capture_config.post_process_novelty_threshold,
+                global_window=self.capture_config.post_process_global_window_size,
+                min_sentence_words=self.capture_config.post_process_min_sentence_words
             )
-            
+
             # Create processed filename
             timestamp = self.current_capture_timestamp or datetime.now().strftime(TIMESTAMP_FORMAT)
             processed_filename = self.file_manager.create_capture_filename(
                 timestamp, custom_name, processed=True
             )
             processed_filepath = self.file_manager.CAPTURES_DIR / processed_filename
-            
-            # Write processed content
+
+            # Write processed content with metadata header
             with open(processed_filepath, 'w', encoding='utf-8') as f:
-                for timestamp, text in unique_blocks:
-                    f.write(f"{timestamp} {text}\n")
-            
+                # Write metadata header
+                f.write(f"CaptiOCR Processed Transcription\n")
+                f.write(f"Version: {APP_VERSION}\n")
+                if metadata.get('capture_started'):
+                    f.write(f"Capture started: {metadata['capture_started']}\n")
+                f.write(f"Processed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                if metadata.get('language'):
+                    f.write(f"Language: {metadata['language']}\n")
+                f.write(f"Original blocks: {len(text_blocks)}\n")
+                f.write(f"Processed blocks: {len(unique_blocks)}\n")
+                f.write(f"\n{'=' * 60}\n\n")
+
+                # Write processed content
+                for ts, text in unique_blocks:
+                    f.write(f"{ts} {text}\n")
+
             self.logger.info(
                 f"Processed file saved: {processed_filepath} "
-                f"({len(blocks)} -> {len(unique_blocks)} blocks)"
+                f"({len(text_blocks)} -> {len(unique_blocks)} blocks)"
             )
-            
+
             return str(processed_filepath)
-            
+
         except Exception as e:
             self.logger.error(f"Error processing capture file: {e}")
             return None
