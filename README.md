@@ -1,10 +1,9 @@
 # 🖥️ CaptiOCR - Real-Time Screen Text Extraction
 
+[![GitHub Release](https://img.shields.io/github/v/release/CarloSacchi/CaptiOCR)](https://github.com/CarloSacchi/CaptiOCR/releases/latest)
 [![CodeQL](https://github.com/carlosacchi/captiocr/actions/workflows/github-code-scanning/codeql/badge.svg)](https://github.com/carlosacchi/captiocr/actions/workflows/github-code-scanning/codeql)
 
 **CaptiOCR** is an open-source **real-time screen text extraction tool** designed to capture and transcribe captions (subtitles) from video conferencing applications like **Microsoft Teams**, **Zoom**, and **Google Meet**. With an intuitive interface and powerful OCR capabilities, you can select any screen area and extract text continuously in real-time.
-
-🚀 **Latest Version: 0.14.0** - Major security and quality improvements!
 
 ---
 
@@ -168,12 +167,6 @@ Enable debug logging in the application settings to capture detailed operation i
 
 ## 🗺️ Roadmap
 
-### **Current Version (0.12.00)**
-- ✅ Multi-monitor support with DPI awareness
-- ✅ Modular, maintainable codebase
-- ✅ Enhanced text processing
-- ✅ Improved error handling
-
 ### **Upcoming Features**
 - 🔄 **Live translation** integration
 - 🔄 **Cloud storage** synchronization  
@@ -214,7 +207,6 @@ This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) 
 
 **Author:** Carlo Sacchi
 **Website:** [https://www.captiocr.com](https://www.captiocr.com)
-**Version:** 0.14.0 (February 2026)
 
 For support, feature requests, or bug reports, please open an issue on GitHub.
 

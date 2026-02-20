@@ -388,7 +388,37 @@ class TextProcessor:
                          'NO', 'no', 'No', 'SO', 'so', 'So', 'OR', 'or', 'Or', 'UP',
                          'AT', 'at', 'At', 'IF', 'if', 'If', 'ON', 'on', 'On', 'AN',
                          'DO', 'do', 'Do', 'IN', 'in', 'In', 'TO', 'to', 'To', 'BY',
-                         'OH', 'oh', 'Oh', 'HI', 'hi', 'Hi', 'US', 'us', 'GO', 'go'}
+                         'OH', 'oh', 'Oh', 'HI', 'hi', 'Hi', 'US', 'us', 'GO', 'go',
+                         # Technical acronyms commonly used in meetings
+                         'PR', 'CI', 'CD', 'API', 'ADO', 'VM', 'DB', 'QA', 'UI', 'UX',
+                         'HR', 'ID', 'IP', 'OS', 'ML', 'AI', 'AB', 'P1', 'P2', 'P3',
+                         'P4', 'SLA', 'POC', 'MVP', 'UAT', 'DEV', 'OPS', 'GIT', 'NPR',
+                         'ABA', 'SPN', 'AAD', 'URL', 'SSH', 'DNS', 'VPN', 'AWS', 'GCP',
+                         # Domain / data acronyms
+                         'CRM', 'ERP', 'SQL', 'ETL', 'CSV', 'EKG', 'DKG', 'XML', 'JSON',
+                         'PDF', 'SDK', 'IOT', 'KPI', 'ROI', 'B2B', 'B2C', 'SAP', 'BI'}
+
+    # Phrases that should never be filtered out, even if they appear low-novelty or duplicate-like.
+    # Matched case-insensitively against sentence text.
+    _PROTECTED_PHRASES = [
+        # DevOps / workflow
+        'close associated', 'close the pr', 'close pr', 'merge pr', 'complete pr',
+        'pull request', 'checkbox', 'approval', 'approver', 'approve',
+        'hotfix', 'rollback', 'revert', 'deploy', 'release',
+        'production', 'incident', 'outage', 'blocker', 'critical',
+        'service principal', 'pipeline', 'permission',
+        # Domain / business
+        'supply chain', 'software as a service', 'data source', 'data flow',
+        'dashboard', 'blob storage', 'gold layer', 'silver layer', 'bronze layer',
+        'canonical', 'architecture', 'integration', 'modular',
+        'enterprise', 'knowledge graph', 'demand planning',
+        'technology stack', 'third party', 'manufacturer',
+    ]
+
+    def _contains_protected_phrase(self, sentence: str) -> bool:
+        """Check if the sentence contains any protected workflow phrase."""
+        lower = sentence.lower()
+        return any(phrase in lower for phrase in self._PROTECTED_PHRASES)
 
     @staticmethod
     def _is_gibberish_token(word: str) -> bool:
@@ -473,43 +503,66 @@ class TextProcessor:
 
         return text
 
+    # Compiled speaker label patterns for reuse
+    # The comma pattern requires 4+ char name components to avoid matching OCR garbage
+    # like "OK, OK" or "Metal, Egg, PYLON" as speaker labels.
+    _SPEAKER_LABEL_RE = re.compile(
+        r'[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s*@\s*'              # FirstName LastName @
+        r'|'
+        r'[A-Z][a-zA-Z]{3,}(?:,\s*[A-Z][a-zA-Z]{3,})+(?:\s+\([^)]*\))?\s*'  # LastName, FirstName (qualifier)
+    )
+
     def _split_into_sentences(self, text: str,
-                              min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS) -> List[str]:
+                              min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS,
+                              preserve_speakers: bool = True) -> List[str]:
         """
         Split text into sentence-like segments based on speaker labels and punctuation.
 
         In caption OCR, "sentences" are often delimited by speaker labels rather than
         punctuation. This method handles both cases.
         Speaker labels require either "@" or "(qualifier)" to avoid matching normal words.
+
+        Args:
+            text: Text to split
+            min_sentence_words: Minimum words for a sentence to be kept
+            preserve_speakers: If True, prefix sentences with the most recent speaker label
         """
         if not text:
             return []
 
-        # Pattern 1: "Name Name @" - space-separated names ending with @
-        # Pattern 2: "Name, Name (qualifier)" - comma-separated names with parenthetical
-        speaker_pattern = (
-            r'(?:'
-            r'[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s*@\s*'      
-            r'|'
-            r'[A-Z][a-zA-Z]+(?:,\s*[A-Z][a-zA-Z]+)+(?:\s+\([^)]*\))?\s*'  
-            r')'
-        )
+        # Find all speaker labels and their positions
+        labels = list(self._SPEAKER_LABEL_RE.finditer(text))
 
-        # Split on speaker labels
-        segments = re.split(speaker_pattern, text)
+        # Build list of (speaker_name, speech_text) pairs
+        segments = []
+        current_speaker = ""
+        prev_end = 0
+
+        for match in labels:
+            # Text before this label belongs to previous speaker
+            speech = text[prev_end:match.start()].strip()
+            if speech:
+                segments.append((current_speaker, speech))
+            # Extract speaker name (strip trailing @ and whitespace)
+            current_speaker = match.group().rstrip('@ ').strip()
+            prev_end = match.end()
+
+        # Remaining text after last label
+        speech = text[prev_end:].strip()
+        if speech:
+            segments.append((current_speaker, speech))
 
         result = []
-        for segment in segments:
-            segment = segment.strip()
-            if not segment:
-                continue
-
-            # Further split on sentence-ending punctuation
-            sub_sentences = re.split(r'(?<=[.!?])\s+', segment)
+        for speaker, segment_text in segments:
+            # Split on sentence-ending punctuation
+            sub_sentences = re.split(r'(?<=[.!?])\s+', segment_text)
             for sent in sub_sentences:
                 sent = sent.strip(' ,.')
                 if sent and len(sent.split()) >= min_sentence_words:
-                    result.append(sent)
+                    if preserve_speakers and speaker:
+                        result.append(f"[{speaker}] {sent}")
+                    else:
+                        result.append(sent)
 
         return result
 
@@ -550,24 +603,33 @@ class TextProcessor:
         Check if a sentence is a near-duplicate of any recently seen sentence.
 
         Uses both SequenceMatcher similarity and word-level containment check.
+        For short sentences (< 8 words), requires both overlap AND similarity to match
+        to avoid false positives on sentences that share common words but differ in meaning.
         """
         sent_lower = sentence.lower().strip()
         sent_words = set(sent_lower.split())
+        is_short = len(sent_words) < 8
 
         for seen in seen_sentences:
             seen_lower = seen.lower().strip()
             seen_words = set(seen_lower.split())
 
-            # Check word-level containment: if most words of new sentence are in a seen one
+            overlap = 0.0
             if sent_words and seen_words:
                 overlap = len(sent_words & seen_words) / len(sent_words)
-                if overlap >= 0.85:
-                    return True
 
-            # Fuzzy string similarity
             similarity = difflib.SequenceMatcher(None, sent_lower, seen_lower).ratio()
-            if similarity >= similarity_threshold:
-                return True
+
+            if is_short:
+                # Short sentences: require BOTH high overlap AND high similarity
+                if overlap >= 0.92 and similarity >= similarity_threshold:
+                    return True
+            else:
+                # Longer sentences: either high overlap or high similarity is enough
+                if overlap >= 0.92:
+                    return True
+                if similarity >= similarity_threshold:
+                    return True
 
         return False
 
@@ -605,32 +667,59 @@ class TextProcessor:
         seen_words = set()
         result_blocks = []
 
+        # Diagnostics counters
+        stats = {
+            'total_sentences': 0,
+            'dropped_duplicate': 0,
+            'dropped_low_novelty': 0,
+            'dropped_artifact': 0,
+            'kept_protected': 0,
+            'kept_novel': 0,
+        }
+
         for timestamp, text in text_blocks:
             # Step 1: Clean OCR artifacts
             cleaned = self._clean_ocr_artifacts(text)
             if not cleaned:
+                stats['dropped_artifact'] += 1
                 continue
 
             # Step 2: Split into sentences
             sentences = self._split_into_sentences(cleaned, min_sentence_words)
             if not sentences:
+                stats['dropped_artifact'] += 1
                 continue
+
+            stats['total_sentences'] += len(sentences)
 
             # Step 3: Filter each sentence
             novel_sentences = []
             for sentence in sentences:
+                # Protected phrases bypass duplicate and novelty filters
+                is_protected = self._contains_protected_phrase(sentence)
+
                 # Skip if it's a near-duplicate of a recently seen sentence
-                if self._is_duplicate_sentence(sentence, seen_sentences, sentence_similarity):
+                if not is_protected and self._is_duplicate_sentence(
+                        sentence, seen_sentences, sentence_similarity):
                     self.logger.debug(f"Post-process: duplicate sentence filtered: '{sentence[:60]}...'")
+                    stats['dropped_duplicate'] += 1
                     continue
 
                 # Check novelty ratio - are enough words in this sentence truly new?
-                novelty = self._calculate_novelty_ratio(sentence, seen_words)
-                if novelty < novelty_threshold:
-                    self.logger.debug(
-                        f"Post-process: low novelty ({novelty:.2f}): '{sentence[:60]}...'"
-                    )
-                    continue
+                if not is_protected:
+                    novelty = self._calculate_novelty_ratio(sentence, seen_words)
+                    if novelty < novelty_threshold:
+                        self.logger.debug(
+                            f"Post-process: low novelty ({novelty:.2f}): '{sentence[:60]}...'"
+                        )
+                        stats['dropped_low_novelty'] += 1
+                        continue
+
+                if is_protected:
+                    self.logger.debug(f"Post-process: protected phrase kept: '{sentence[:60]}...'")
+                    stats['kept_protected'] += 1
+                else:
+                    stats['kept_novel'] += 1
 
                 novel_sentences.append(sentence)
                 seen_sentences.appendleft(sentence)
@@ -645,9 +734,17 @@ class TextProcessor:
                 result_blocks.append((timestamp, combined_text))
 
         self.logger.info(
-            f"Aggressive post-process: {len(text_blocks)} -> {len(result_blocks)} blocks "
+            f"Post-process: {len(text_blocks)} -> {len(result_blocks)} blocks "
             f"({len(text_blocks) - len(result_blocks)} blocks removed)"
         )
+        self.logger.info(
+            f"Post-process stats: {stats['total_sentences']} sentences evaluated, "
+            f"{stats['dropped_duplicate']} duplicate, {stats['dropped_low_novelty']} low-novelty, "
+            f"{stats['dropped_artifact']} artifact blocks, {stats['kept_protected']} protected"
+        )
+
+        # Store stats for external access (e.g., processed file header)
+        self._last_post_process_stats = stats
 
         return result_blocks
 

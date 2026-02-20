@@ -498,6 +498,18 @@ class ScreenCapture:
                     f.write(f"Language: {metadata['language']}\n")
                 f.write(f"Original blocks: {len(text_blocks)}\n")
                 f.write(f"Processed blocks: {len(unique_blocks)}\n")
+
+                # Write processing diagnostics if available
+                stats = getattr(self.text_processor, '_last_post_process_stats', None)
+                if stats:
+                    f.write(f"\n--- Processing Diagnostics ---\n")
+                    f.write(f"Sentences evaluated: {stats['total_sentences']}\n")
+                    f.write(f"Dropped (duplicate): {stats['dropped_duplicate']}\n")
+                    f.write(f"Dropped (low novelty): {stats['dropped_low_novelty']}\n")
+                    f.write(f"Dropped (artifact/empty): {stats['dropped_artifact']}\n")
+                    f.write(f"Kept (protected phrase): {stats['kept_protected']}\n")
+                    f.write(f"Kept (novel): {stats['kept_novel']}\n")
+
                 f.write(f"\n{'=' * 60}\n\n")
 
                 # Write processed content
