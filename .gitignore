@@ -125,7 +125,7 @@ coverage/
 *.pg_dump
 
 # CI/CD
-/.github/workflows/*
+# /.github/workflows/*
 /.circleci/*
 /.travis.yml
 /.gitlab-ci.yml
@@ -150,6 +150,23 @@ Pods/
 DerivedData/
 
 # Custom
-custom_exclude_folder/
+_do_not_upload/
+/logs/
+/captures/
+/config/
+/tessdata/
+/resources/
 legacy_temp/
 notes_and_drafts/
+*.json
+*.traineddata
+claude.txt
+things_to_*
+about.txt
+CaptiOCR_old.py
+claude.md
+AlwaysOnTopIssue.txt
+analysis_raw_capture_pipeline.md
+
+# Explicitly include
+!requirements.txt
