@@ -13,10 +13,12 @@ from ..config.constants import (
     DEFAULT_RECENT_TEXTS_WINDOW_SIZE,
     DEFAULT_DELTA_BUFFER_THRESHOLD,
     DEFAULT_INCREMENTAL_THRESHOLD,
-    POST_PROCESS_SENTENCE_SIMILARITY,
-    POST_PROCESS_NOVELTY_THRESHOLD,
-    POST_PROCESS_MIN_SENTENCE_WORDS,
-    POST_PROCESS_GLOBAL_WINDOW_SIZE
+    POST_PROCESS_DEDUP_ENTER_THRESHOLD,
+    POST_PROCESS_DEDUP_EXIT_THRESHOLD,
+    POST_PROCESS_MIN_LENGTH_RATIO,
+    POST_PROCESS_MIN_NEW_WORDS,
+    POST_PROCESS_FRAME_CONSENSUS_WINDOW,
+    POST_PROCESS_MIN_SENTENCE_WORDS
 )
 
 
@@ -35,11 +37,13 @@ class CaptureConfig:
     delta_buffer_threshold: int = DEFAULT_DELTA_BUFFER_THRESHOLD
     incremental_threshold: float = DEFAULT_INCREMENTAL_THRESHOLD
 
-    # Post-processing deduplication parameters
-    post_process_sentence_similarity: float = POST_PROCESS_SENTENCE_SIMILARITY
-    post_process_novelty_threshold: float = POST_PROCESS_NOVELTY_THRESHOLD
+    # Post-processing pipeline parameters
+    post_process_dedup_enter: float = POST_PROCESS_DEDUP_ENTER_THRESHOLD
+    post_process_dedup_exit: float = POST_PROCESS_DEDUP_EXIT_THRESHOLD
+    post_process_min_length_ratio: float = POST_PROCESS_MIN_LENGTH_RATIO
+    post_process_min_new_words: int = POST_PROCESS_MIN_NEW_WORDS
+    post_process_frame_window: int = POST_PROCESS_FRAME_CONSENSUS_WINDOW
     post_process_min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS
-    post_process_global_window_size: int = POST_PROCESS_GLOBAL_WINDOW_SIZE
 
     # Callbacks
     on_interval_change: Optional[Callable[[float], None]] = field(default=None, repr=False)
@@ -200,10 +204,12 @@ class CaptureConfig:
             'recent_texts_window_size': self.recent_texts_window_size,
             'delta_buffer_threshold': self.delta_buffer_threshold,
             'incremental_threshold': self.incremental_threshold,
-            'post_process_sentence_similarity': self.post_process_sentence_similarity,
-            'post_process_novelty_threshold': self.post_process_novelty_threshold,
-            'post_process_min_sentence_words': self.post_process_min_sentence_words,
-            'post_process_global_window_size': self.post_process_global_window_size
+            'post_process_dedup_enter': self.post_process_dedup_enter,
+            'post_process_dedup_exit': self.post_process_dedup_exit,
+            'post_process_min_length_ratio': self.post_process_min_length_ratio,
+            'post_process_min_new_words': self.post_process_min_new_words,
+            'post_process_frame_window': self.post_process_frame_window,
+            'post_process_min_sentence_words': self.post_process_min_sentence_words
         }
     
     def from_dict(self, config_dict: dict) -> None:
@@ -255,35 +261,57 @@ class CaptureConfig:
                 self._logger.warning(f"Invalid incremental_threshold value: {value}, using default")
                 self.incremental_threshold = DEFAULT_INCREMENTAL_THRESHOLD
 
-        # Load and validate post-processing parameters
-        if 'post_process_sentence_similarity' in config_dict:
-            value = config_dict['post_process_sentence_similarity']
-            if isinstance(value, (int, float)) and 0.5 <= value <= 0.95:
-                self.post_process_sentence_similarity = float(value)
+        # Load and validate post-processing pipeline parameters
+        if 'post_process_dedup_enter' in config_dict:
+            value = config_dict['post_process_dedup_enter']
+            if isinstance(value, (int, float)) and 0.50 <= value <= 0.95:
+                self.post_process_dedup_enter = float(value)
             else:
-                self._logger.warning(f"Invalid post_process_sentence_similarity: {value}, using default")
-                self.post_process_sentence_similarity = POST_PROCESS_SENTENCE_SIMILARITY
+                self._logger.warning(f"Invalid post_process_dedup_enter: {value}, using default")
+                self.post_process_dedup_enter = POST_PROCESS_DEDUP_ENTER_THRESHOLD
 
-        if 'post_process_novelty_threshold' in config_dict:
-            value = config_dict['post_process_novelty_threshold']
-            if isinstance(value, (int, float)) and 0.05 <= value <= 0.5:
-                self.post_process_novelty_threshold = float(value)
+        if 'post_process_dedup_exit' in config_dict:
+            value = config_dict['post_process_dedup_exit']
+            if isinstance(value, (int, float)) and 0.30 <= value <= 0.80:
+                self.post_process_dedup_exit = float(value)
             else:
-                self._logger.warning(f"Invalid post_process_novelty_threshold: {value}, using default")
-                self.post_process_novelty_threshold = POST_PROCESS_NOVELTY_THRESHOLD
+                self._logger.warning(f"Invalid post_process_dedup_exit: {value}, using default")
+                self.post_process_dedup_exit = POST_PROCESS_DEDUP_EXIT_THRESHOLD
+
+        # Enforce hysteresis gap: exit must be lower than enter
+        if self.post_process_dedup_exit >= self.post_process_dedup_enter:
+            self._logger.warning("dedup_exit >= dedup_enter, resetting to defaults")
+            self.post_process_dedup_enter = POST_PROCESS_DEDUP_ENTER_THRESHOLD
+            self.post_process_dedup_exit = POST_PROCESS_DEDUP_EXIT_THRESHOLD
+
+        if 'post_process_min_length_ratio' in config_dict:
+            value = config_dict['post_process_min_length_ratio']
+            if isinstance(value, (int, float)) and 0.30 <= value <= 0.90:
+                self.post_process_min_length_ratio = float(value)
+            else:
+                self._logger.warning(f"Invalid post_process_min_length_ratio: {value}, using default")
+                self.post_process_min_length_ratio = POST_PROCESS_MIN_LENGTH_RATIO
+
+        if 'post_process_min_new_words' in config_dict:
+            value = config_dict['post_process_min_new_words']
+            if isinstance(value, int) and 1 <= value <= 10:
+                self.post_process_min_new_words = value
+            else:
+                self._logger.warning(f"Invalid post_process_min_new_words: {value}, using default")
+                self.post_process_min_new_words = POST_PROCESS_MIN_NEW_WORDS
+
+        if 'post_process_frame_window' in config_dict:
+            value = config_dict['post_process_frame_window']
+            if isinstance(value, int) and 2 <= value <= 5:
+                self.post_process_frame_window = value
+            else:
+                self._logger.warning(f"Invalid post_process_frame_window: {value}, using default")
+                self.post_process_frame_window = POST_PROCESS_FRAME_CONSENSUS_WINDOW
 
         if 'post_process_min_sentence_words' in config_dict:
             value = config_dict['post_process_min_sentence_words']
-            if isinstance(value, int) and 2 <= value <= 10:
+            if isinstance(value, int) and 1 <= value <= 10:
                 self.post_process_min_sentence_words = value
             else:
                 self._logger.warning(f"Invalid post_process_min_sentence_words: {value}, using default")
                 self.post_process_min_sentence_words = POST_PROCESS_MIN_SENTENCE_WORDS
-
-        if 'post_process_global_window_size' in config_dict:
-            value = config_dict['post_process_global_window_size']
-            if isinstance(value, int) and 10 <= value <= 100:
-                self.post_process_global_window_size = value
-            else:
-                self._logger.warning(f"Invalid post_process_global_window_size: {value}, using default")
-                self.post_process_global_window_size = POST_PROCESS_GLOBAL_WINDOW_SIZE

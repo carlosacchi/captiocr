@@ -10,10 +10,12 @@ import logging
 from ..config.constants import (
     TEXT_SIMILARITY_THRESHOLD,
     MIN_TEXT_LENGTH,
-    POST_PROCESS_SENTENCE_SIMILARITY,
-    POST_PROCESS_NOVELTY_THRESHOLD,
-    POST_PROCESS_MIN_SENTENCE_WORDS,
-    POST_PROCESS_GLOBAL_WINDOW_SIZE
+    POST_PROCESS_DEDUP_ENTER_THRESHOLD,
+    POST_PROCESS_DEDUP_EXIT_THRESHOLD,
+    POST_PROCESS_MIN_LENGTH_RATIO,
+    POST_PROCESS_MIN_NEW_WORDS,
+    POST_PROCESS_FRAME_CONSENSUS_WINDOW,
+    POST_PROCESS_MIN_SENTENCE_WORDS
 )
 
 
@@ -39,6 +41,14 @@ class TextProcessor:
         self._whitespace_pattern = re.compile(r'\s+')
         self._sentence_pattern = re.compile(r'[.!?]+')
 
+        # Short semantic responses that bypass similarity check in live capture
+        # These are brief replies that should never be dropped even if the frame is >85% similar
+        self._short_semantic_responses = frozenset({
+            'yes', 'no', 'yeah', 'yep', 'nope', 'sure', 'ok', 'okay',
+            'right', 'exactly', 'agreed', 'correct', 'definitely',
+            'thanks', 'thank', 'hello', 'hi', 'bye', 'goodbye',
+        })
+
         # Common stop words excluded from novelty ratio calculation
         self._stop_words = frozenset({
             'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'she', 'it', 'they', 'them',
@@ -57,32 +67,56 @@ class TextProcessor:
             'wont', 'wouldnt', 'couldnt', 'shouldnt', 'cant', 'cannot',
         })
     
-    def clean_text(self, text: str) -> str:
+    def clean_text_raw(self, text: str) -> str:
         """
-        Clean OCR text to remove noise and improve readability.
-        
+        Minimal cleaning for raw capture files.
+
+        Only removes control characters and normalizes whitespace.
+        Preserves all OCR content faithfully — no symbol stripping, no filtering.
+        Used by the live capture loop before writing to the raw file.
+
         Args:
             text: Raw OCR text
-            
+
+        Returns:
+            Lightly cleaned text
+        """
+        if not text:
+            return ""
+
+        # Remove control characters (except newline/tab) and null bytes
+        text = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', text)
+
+        # Normalize newlines to spaces (raw file is one line per capture)
+        text = text.replace('\n', ' ').replace('\r', ' ')
+
+        # Normalize whitespace
+        text = self._whitespace_pattern.sub(' ', text)
+
+        return text.strip()
+
+    def clean_text(self, text: str) -> str:
+        """
+        Clean OCR text for post-processing and display.
+
+        Removes problematic Unicode characters and normalizes whitespace.
+        Used by post-processing pipeline and UI display — NOT by live capture.
+
+        Args:
+            text: Raw OCR text
+
         Returns:
             Cleaned text
         """
         if not text:
             return ""
-        
-        # TEMPORARILY DISABLED - TOO AGGRESSIVE CLEANING
-        # Remove single letters and very short fragments  
-        # text = self._short_word_pattern.sub('', text)
-        
-        # Remove weird Unicode or special characters - BE MORE SELECTIVE
-        # text = self._special_char_pattern.sub('', text)
-        
+
         # Only remove truly problematic characters, keep dashes and common symbols
-        text = re.sub(r'[^\w\s.,!?():\-—–|/\\&%$#@*+="<>]', '', text)
-        
+        text = re.sub(r'[^\w\s.,!?():\-\u2014\u2013|/\\&%$#@*+="<>\']', '', text)
+
         # Normalize whitespace
         text = self._whitespace_pattern.sub(' ', text)
-        
+
         return text.strip()
     
     def calculate_similarity(self, text1: str, text2: str) -> float:
@@ -228,13 +262,14 @@ class TextProcessor:
     def has_significant_new_content(self, new_text: str, previous_text: str,
                                     threshold: Optional[float] = None) -> bool:
         """
-        Determine if new text contains significant new content.
+        Determine if new text contains significant new content compared to the previous capture.
 
-        DEPRECATED: Use extract_new_content() instead for better duplicate handling.
-        This method is kept for backward compatibility.
+        Used by the live capture loop (recall-first strategy): write the full OCR text
+        whenever it differs enough from the last written capture. No delta extraction,
+        no minimum length filter — short utterances are preserved faithfully.
 
         Args:
-            new_text: New text to evaluate
+            new_text: New text to evaluate (already cleaned by caller)
             previous_text: Previous text for comparison
             threshold: Custom similarity threshold (optional)
 
@@ -244,12 +279,8 @@ class TextProcessor:
         # Use provided threshold or default
         threshold = threshold or self.similarity_threshold
 
-        # Clean the new text
-        new_text = self.clean_text(new_text)
-
-        # Check if text is too short after cleaning
-        if len(new_text) < MIN_TEXT_LENGTH:
-            self.logger.debug(f"Text too short after cleaning: {len(new_text)} chars")
+        # Accept any non-empty text (recall-first: never drop at source)
+        if not new_text or not new_text.strip():
             return False
 
         # If no previous text, always accept
@@ -260,9 +291,20 @@ class TextProcessor:
         similarity = self.calculate_similarity(new_text, previous_text)
         self.logger.debug(f"Text similarity: {similarity:.2f} (threshold: {threshold})")
 
-        # Return True if text is different enough
-        return similarity < threshold
-    
+        if similarity < threshold:
+            return True
+
+        # Bypass: accept even high-similarity frames if they contain new short semantic content
+        # This catches brief replies (yes/no/ok/sure) appended to a rolling caption window
+        new_words = set(new_text.lower().split())
+        prev_words = set(previous_text.lower().split())
+        novel_words = new_words - prev_words
+        if novel_words & self._short_semantic_responses:
+            self.logger.debug(f"Similarity bypass: novel short response detected: {novel_words & self._short_semantic_responses}")
+            return True
+
+        return False
+
     def extract_sentences(self, text: str) -> List[str]:
         """
         Extract sentences from text.
@@ -380,45 +422,7 @@ class TextProcessor:
 
         return unique_blocks
     
-    # --- Aggressive Post-Processing (for processed files) ---
-
-    # Common short words to never flag as OCR artifacts
-    _REAL_SHORT_WORDS = {'I', 'a', 'A',
-                         'OK', 'ok', 'Ok', 'IT', 'it', 'It', 'AM', 'am', 'PM', 'pm',
-                         'NO', 'no', 'No', 'SO', 'so', 'So', 'OR', 'or', 'Or', 'UP',
-                         'AT', 'at', 'At', 'IF', 'if', 'If', 'ON', 'on', 'On', 'AN',
-                         'DO', 'do', 'Do', 'IN', 'in', 'In', 'TO', 'to', 'To', 'BY',
-                         'OH', 'oh', 'Oh', 'HI', 'hi', 'Hi', 'US', 'us', 'GO', 'go',
-                         # Technical acronyms commonly used in meetings
-                         'PR', 'CI', 'CD', 'API', 'ADO', 'VM', 'DB', 'QA', 'UI', 'UX',
-                         'HR', 'ID', 'IP', 'OS', 'ML', 'AI', 'AB', 'P1', 'P2', 'P3',
-                         'P4', 'SLA', 'POC', 'MVP', 'UAT', 'DEV', 'OPS', 'GIT', 'NPR',
-                         'ABA', 'SPN', 'AAD', 'URL', 'SSH', 'DNS', 'VPN', 'AWS', 'GCP',
-                         # Domain / data acronyms
-                         'CRM', 'ERP', 'SQL', 'ETL', 'CSV', 'EKG', 'DKG', 'XML', 'JSON',
-                         'PDF', 'SDK', 'IOT', 'KPI', 'ROI', 'B2B', 'B2C', 'SAP', 'BI'}
-
-    # Phrases that should never be filtered out, even if they appear low-novelty or duplicate-like.
-    # Matched case-insensitively against sentence text.
-    _PROTECTED_PHRASES = [
-        # DevOps / workflow
-        'close associated', 'close the pr', 'close pr', 'merge pr', 'complete pr',
-        'pull request', 'checkbox', 'approval', 'approver', 'approve',
-        'hotfix', 'rollback', 'revert', 'deploy', 'release',
-        'production', 'incident', 'outage', 'blocker', 'critical',
-        'service principal', 'pipeline', 'permission',
-        # Domain / business
-        'supply chain', 'software as a service', 'data source', 'data flow',
-        'dashboard', 'blob storage', 'gold layer', 'silver layer', 'bronze layer',
-        'canonical', 'architecture', 'integration', 'modular',
-        'enterprise', 'knowledge graph', 'demand planning',
-        'technology stack', 'third party', 'manufacturer',
-    ]
-
-    def _contains_protected_phrase(self, sentence: str) -> bool:
-        """Check if the sentence contains any protected workflow phrase."""
-        lower = sentence.lower()
-        return any(phrase in lower for phrase in self._PROTECTED_PHRASES)
+    # --- Post-Processing (for processed files) ---
 
     @staticmethod
     def _is_gibberish_token(word: str) -> bool:
@@ -434,6 +438,15 @@ class TextProcessor:
         letters_only = ''.join(c for c in word if c.isalpha())
         if not letters_only:
             return False
+
+        # Check for repetitive character patterns (e.g., "eee", "SSSeSSeSeeeaeeSSSSS")
+        if len(letters_only) >= 3:
+            unique_chars = len(set(letters_only.lower()))
+            char_ratio = unique_chars / len(letters_only)
+            if len(letters_only) >= 5 and char_ratio < 0.30:
+                return True
+            if re.search(r'(.)\1{2,}', letters_only, re.IGNORECASE):
+                return True
 
         # Check for unusual mixed case (lowercase-uppercase-lowercase within word body)
         has_mixed_case = bool(re.search(r'[a-z][A-Z][a-z]', word))
@@ -473,11 +486,17 @@ class TextProcessor:
         if not text:
             return ""
 
-        # Remove leading OCR garbage (lines starting with dashes, equals, pipes, random symbols)
-        text = re.sub(r'^[\s—–\-=_|+.*%&]+', '', text)
+        # Normalize pipe to I when used as a letter (common OCR misread: "| think" → "I think")
+        # Replace pipe at word boundaries: start of word, standalone, or before lowercase
+        text = re.sub(r'\|(?=\s)', 'I', text)   # "| " → "I "
+        text = re.sub(r'(?<=\s)\|', 'I', text)  # " |" → " I"
+        text = re.sub(r'^\|', 'I', text)         # Start of text
 
-        # Remove runs of dashes, equals, underscores, pipes (2+ chars)
-        text = re.sub(r'[—–\-=_|]{2,}', ' ', text)
+        # Remove leading OCR garbage (lines starting with dashes, equals, random symbols)
+        text = re.sub(r'^[\s\u2014\u2013\-=_+.*%&]+', '', text)
+
+        # Remove runs of dashes, equals, underscores (2+ chars)
+        text = re.sub(r'[\u2014\u2013\-=_]{2,}', ' ', text)
 
         # Remove gibberish tokens word by word
         words = text.split()
@@ -485,10 +504,16 @@ class TextProcessor:
         for word in words:
             # Strip punctuation for checking but keep original if valid
             stripped = word.strip('.,!?;:()[]{}')
-            if stripped and len(stripped) <= 3 and stripped.isupper() and stripped not in self._REAL_SHORT_WORDS:
-                continue  # Remove isolated uppercase 2-3 letter OCR noise (EE, BJ, etc.)
+            # Remove isolated uppercase 2-3 letter OCR noise using repetition-based detection
+            # Protect common valid words: I, OK, IT, IS, OR, AN, AM, AT, IF, OF, ON, US, NO
+            if stripped and 2 <= len(stripped) <= 3 and stripped.isupper():
+                letters = stripped.lower()
+                has_vowel = any(c in 'aeiou' for c in letters)
+                is_repeated = len(set(letters)) == 1
+                if is_repeated or not has_vowel:
+                    continue
             if self._is_gibberish_token(stripped):
-                continue  # Remove gibberish tokens
+                continue
             cleaned_words.append(word)
         text = ' '.join(cleaned_words)
 
@@ -504,12 +529,13 @@ class TextProcessor:
         return text
 
     # Compiled speaker label patterns for reuse
-    # The comma pattern requires 4+ char name components to avoid matching OCR garbage
-    # like "OK, OK" or "Metal, Egg, PYLON" as speaker labels.
+    # The @ pattern is the primary speaker delimiter in Teams/Zoom/Meet captions.
+    # The comma pattern requires a parenthetical qualifier to avoid false positives
+    # like "Yeah, Marcos" being matched as a speaker label.
     _SPEAKER_LABEL_RE = re.compile(
         r'[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s*@\s*'              # FirstName LastName @
         r'|'
-        r'[A-Z][a-zA-Z]{3,}(?:,\s*[A-Z][a-zA-Z]{3,})+(?:\s+\([^)]*\))?\s*'  # LastName, FirstName (qualifier)
+        r'[A-Z][a-zA-Z]{2,}(?:,\s*[A-Z][a-zA-Z]{2,})+(?:\s+\([^)]*\))\s*'  # LastName, FirstName (qualifier) — required
     )
 
     def _split_into_sentences(self, text: str,
@@ -552,13 +578,21 @@ class TextProcessor:
         if speech:
             segments.append((current_speaker, speech))
 
+        # Short meaningful responses that should be preserved even below min_sentence_words
+        short_meaningful = {'yes', 'no', 'sure', 'ok', 'okay', 'right', 'exactly',
+                            'agreed', 'correct', 'thanks', 'hello', 'hi', 'bye'}
+
         result = []
         for speaker, segment_text in segments:
             # Split on sentence-ending punctuation
             sub_sentences = re.split(r'(?<=[.!?])\s+', segment_text)
             for sent in sub_sentences:
                 sent = sent.strip(' ,.')
-                if sent and len(sent.split()) >= min_sentence_words:
+                if not sent:
+                    continue
+                word_count = len(sent.split())
+                is_meaningful_short = sent.lower().strip('.,!?') in short_meaningful
+                if word_count >= min_sentence_words or is_meaningful_short:
                     if preserve_speakers and speaker:
                         result.append(f"[{speaker}] {sent}")
                     else:
@@ -566,184 +600,352 @@ class TextProcessor:
 
         return result
 
+    # UI overlay artifact patterns (CaptiOCR's own overlay text that OCR reads back)
+    _UI_ARTIFACT_RE = re.compile(
+        r'Press\s+ESC|Click\s+and\s+drag|select\s+capture|ESC\s+to\s+cancel',
+        re.IGNORECASE
+    )
+
+    def _is_ui_artifact(self, text: str) -> bool:
+        """Check if text contains UI overlay artifacts from the capture tool itself."""
+        return bool(self._UI_ARTIFACT_RE.search(text))
+
+    def _build_speaker_name_cache(self, text_blocks: List[Tuple[str, str]]) -> dict:
+        """
+        Build a cache of full speaker names and OCR-mangled variants from all text blocks.
+
+        Scans for speaker labels with qualifiers (e.g. "LastName, FirstName (external)")
+        and builds a lookup from truncated/mangled variants to full names.
+
+        Returns:
+            Dict mapping variant strings to their correct full speaker labels.
+        """
+        # Find all full speaker labels (those with qualifiers like "(external)")
+        full_names = set()
+        qualified_pattern = re.compile(
+            r'([A-Z][a-zA-Z]{2,}(?:,\s*[A-Z][a-zA-Z]{2,})+(?:\s+\([^)]*\)))'
+        )
+        at_pattern = re.compile(
+            r'([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s*@'
+        )
+
+        for _, text in text_blocks:
+            for match in qualified_pattern.finditer(text):
+                full_names.add(match.group(1).strip())
+            for match in at_pattern.finditer(text):
+                full_names.add(match.group(1).strip())
+
+        if not full_names:
+            return {}
+
+        repair_map = {}
+
+        for full_name in full_names:
+            # 1. Truncation prefixes (e.g. "Zorn, Chri" from "Zorn, Christian (external)")
+            for length in range(6, len(full_name)):
+                prefix = full_name[:length]
+                if prefix not in repair_map or len(full_name) > len(repair_map[prefix]):
+                    repair_map[prefix] = full_name
+
+        # 2. Find OCR-mangled variants via fuzzy match against all speaker-like patterns
+        # Look for "Word, Word" patterns that are close to a known name but not exact
+        mangled_pattern = re.compile(r'[A-Z][a-zA-Z]{1,}(?:,\s*[A-Z][a-zA-Z]{1,})+')
+        all_variants = set()
+        for _, text in text_blocks:
+            for match in mangled_pattern.finditer(text):
+                variant = match.group().strip()
+                if variant not in full_names:
+                    all_variants.add(variant)
+
+        for variant in all_variants:
+            best_match = None
+            best_ratio = 0.0
+            for full_name in full_names:
+                # Compare the base name part (before qualifier)
+                full_base = full_name.split('(')[0].strip()
+                ratio = difflib.SequenceMatcher(None, variant, full_base).ratio()
+                if ratio > best_ratio:
+                    best_ratio = ratio
+                    best_match = full_name
+            # Accept fuzzy matches above 0.75 similarity (catches "Zom" → "Zorn", "Goa" → "Goa,")
+            if best_match and best_ratio >= 0.75:
+                repair_map[variant] = best_match
+
+        self.logger.debug(
+            f"Speaker name cache: {len(full_names)} full names, "
+            f"{len(repair_map)} repair entries (prefixes + fuzzy)"
+        )
+        return repair_map
+
+    def _repair_speaker_names(self, text: str, repair_map: dict) -> str:
+        """
+        Repair truncated and OCR-mangled speaker names in text.
+
+        Replaces variants like "Zorn, Chri", "Zom, Christian", "Goa, Ashok" with
+        the correct full name from the cache.
+        """
+        if not repair_map or not text:
+            return text
+
+        # Sort by variant length descending to match longest first (avoids partial replacements)
+        for variant in sorted(repair_map, key=len, reverse=True):
+            if variant in text and repair_map[variant] not in text:
+                text = text.replace(variant, repair_map[variant])
+
+        return text
+
+    def _find_overlap_boundary(self, prev_text: str, new_text: str) -> Tuple[int, int]:
+        """
+        Find the shared prefix and suffix boundaries between two texts at word level.
+
+        Returns:
+            Tuple of (prefix_end_idx, suffix_start_idx) as word indices into new_text.
+            The novel content is new_words[prefix_end_idx:suffix_start_idx].
+        """
+        prev_words = prev_text.lower().split()
+        new_words = new_text.lower().split()
+
+        # Find shared prefix length
+        prefix_len = 0
+        for i in range(min(len(prev_words), len(new_words))):
+            if prev_words[i] == new_words[i]:
+                prefix_len = i + 1
+            else:
+                break
+
+        # Find shared suffix length (avoid overlapping with prefix)
+        suffix_len = 0
+        max_suffix = min(len(prev_words), len(new_words)) - prefix_len
+        for i in range(1, max_suffix + 1):
+            if prev_words[-i] == new_words[-i]:
+                suffix_len = i
+            else:
+                break
+
+        suffix_start = len(new_words) - suffix_len if suffix_len > 0 else len(new_words)
+        return prefix_len, suffix_start
+
+    def _frame_consensus(self, frames: List[str], min_agreement: int = 2) -> Optional[str]:
+        """
+        Check if content has consensus across a window of frames.
+
+        A chunk is considered stable if its content (by word set overlap) appears
+        in at least min_agreement out of the provided frames.
+
+        Args:
+            frames: List of text content from consecutive frames
+            min_agreement: Minimum number of frames that must agree
+
+        Returns:
+            The consensus text (from the longest agreeing frame), or None if no consensus.
+        """
+        if len(frames) < min_agreement:
+            return None
+
+        candidate = frames[-1]
+        candidate_words = set(candidate.lower().split())
+
+        if not candidate_words:
+            return None
+
+        agreeing_frames = []
+        for frame in frames:
+            frame_words = set(frame.lower().split())
+            if not frame_words:
+                continue
+            overlap = len(candidate_words & frame_words) / max(len(candidate_words), len(frame_words))
+            if overlap >= 0.50:
+                agreeing_frames.append(frame)
+
+        if len(agreeing_frames) >= min_agreement:
+            return max(agreeing_frames, key=len)
+
+        return None
+
     def _get_word_set(self, text: str) -> set:
         """Extract a set of normalized words from text for comparison."""
         words = text.lower().split()
         # Filter out very short words and common OCR noise
         return {w for w in words if len(w) > 2 or w in {'a', 'i', 'is', 'or', 'in', 'to', 'at', 'it', 'if', 'of', 'on'}}
 
-    def _calculate_novelty_ratio(self, sentence: str, seen_words: set) -> float:
-        """
-        Calculate what fraction of content words in a sentence are novel (not seen before).
-
-        Stop words are excluded from the calculation so that common everyday
-        words don't penalize otherwise meaningful new sentences.
-
-        Returns:
-            Ratio from 0.0 (all content words seen) to 1.0 (all content words new).
-            Returns 1.0 when the sentence has no content words (only stop words),
-            so it falls through to the sentence-level dedup check instead.
-        """
-        words = self._get_word_set(sentence)
-        if not words:
-            return 0.0
-
-        # Only evaluate content words (exclude stop words)
-        content_words = words - self._stop_words
-        if not content_words:
-            # Sentence is all stop words — let sentence dedup handle it
-            return 1.0
-
-        new_content_words = content_words - seen_words
-        return len(new_content_words) / len(content_words)
-
-    def _is_duplicate_sentence(self, sentence: str, seen_sentences: deque,
-                                similarity_threshold: float) -> bool:
-        """
-        Check if a sentence is a near-duplicate of any recently seen sentence.
-
-        Uses both SequenceMatcher similarity and word-level containment check.
-        For short sentences (< 8 words), requires both overlap AND similarity to match
-        to avoid false positives on sentences that share common words but differ in meaning.
-        """
-        sent_lower = sentence.lower().strip()
-        sent_words = set(sent_lower.split())
-        is_short = len(sent_words) < 8
-
-        for seen in seen_sentences:
-            seen_lower = seen.lower().strip()
-            seen_words = set(seen_lower.split())
-
-            overlap = 0.0
-            if sent_words and seen_words:
-                overlap = len(sent_words & seen_words) / len(sent_words)
-
-            similarity = difflib.SequenceMatcher(None, sent_lower, seen_lower).ratio()
-
-            if is_short:
-                # Short sentences: require BOTH high overlap AND high similarity
-                if overlap >= 0.92 and similarity >= similarity_threshold:
-                    return True
-            else:
-                # Longer sentences: either high overlap or high similarity is enough
-                if overlap >= 0.92:
-                    return True
-                if similarity >= similarity_threshold:
-                    return True
-
-        return False
-
     def filter_duplicate_blocks_aggressive(self, text_blocks: List[Tuple[str, str]],
-                                            sentence_similarity: float = POST_PROCESS_SENTENCE_SIMILARITY,
-                                            novelty_threshold: float = POST_PROCESS_NOVELTY_THRESHOLD,
-                                            global_window: int = POST_PROCESS_GLOBAL_WINDOW_SIZE,
+                                            dedup_enter: float = POST_PROCESS_DEDUP_ENTER_THRESHOLD,
+                                            dedup_exit: float = POST_PROCESS_DEDUP_EXIT_THRESHOLD,
+                                            min_length_ratio: float = POST_PROCESS_MIN_LENGTH_RATIO,
+                                            min_new_words: int = POST_PROCESS_MIN_NEW_WORDS,
+                                            frame_window: int = POST_PROCESS_FRAME_CONSENSUS_WINDOW,
                                             min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS
                                             ) -> List[Tuple[str, str]]:
         """
-        Aggressively filter duplicate content at the sentence level for post-processing.
+        Recall-first post-processing pipeline for raw capture files.
 
-        Unlike filter_duplicate_blocks (used for live capture), this method:
-        - Removes OCR artifacts and noise
-        - Splits each block into sentences (using speaker labels as delimiters)
-        - Tracks ALL seen sentences globally with fuzzy matching
-        - Applies a novelty ratio to filter sentences with mostly repeated words
-        - Produces a cleaner, more readable transcription
+        Processes raw OCR frames through a multi-stage pipeline:
+        1. UI artifact filter — remove CaptiOCR overlay text
+        2. OCR artifact cleaning — pipe normalization, gibberish removal
+        3. Frame consensus — emit only when content is stable across frames
+        4. No-downgrade rule — skip transient short frames
+        5. Hysteresis dedup — suppress repetition with enter/exit thresholds
+        6. Prefix/suffix overlap dedup — emit only the novel portion
+        7. Sentence splitting — structure the output
 
         Args:
             text_blocks: List of (timestamp, text) tuples from raw capture
-            sentence_similarity: Threshold for fuzzy sentence deduplication (0-1)
-            novelty_threshold: Minimum ratio of new words to keep a sentence (0-1)
-            global_window: Number of recent sentences to track for dedup
+            dedup_enter: Similarity threshold to enter dedup mode
+            dedup_exit: Similarity threshold to exit dedup mode
+            min_length_ratio: No-downgrade rule: min ratio of new vs previous length
+            min_new_words: No-downgrade rule: min new words to accept a shorter frame
+            frame_window: Number of consecutive frames for consensus check
+            global_window: Number of recent sentences to track
             min_sentence_words: Minimum words for a sentence to be kept
 
         Returns:
-            List of (timestamp, text) tuples with aggressive deduplication applied
+            List of (timestamp, text) tuples with deduplication applied
         """
         if not text_blocks:
             return []
 
-        # Global tracking state
-        seen_sentences = deque(maxlen=global_window)
-        seen_words = set()
-        result_blocks = []
+        # Build speaker name cache for repairing truncated names
+        speaker_repair_map = self._build_speaker_name_cache(text_blocks)
 
-        # Diagnostics counters
+        result_blocks = []
+        frame_buffer = deque(maxlen=frame_window)
+        ts_buffer = deque(maxlen=frame_window)
+        prev_emitted_text = ""
+        in_dedup_mode = False
+
         stats = {
-            'total_sentences': 0,
-            'dropped_duplicate': 0,
-            'dropped_low_novelty': 0,
-            'dropped_artifact': 0,
-            'kept_protected': 0,
-            'kept_novel': 0,
+            'speaker_names_repaired': 0,
+            'total_frames': len(text_blocks),
+            'dropped_ui_artifact': 0,
+            'dropped_ocr_artifact': 0,
+            'dropped_no_consensus': 0,
+            'dropped_no_downgrade': 0,
+            'dropped_hysteresis_dedup': 0,
+            'dropped_empty_novel': 0,
+            'merges_performed': 0,
+            'chunks_emitted': 0,
+            'possible_drops_detected': 0,
         }
 
         for timestamp, text in text_blocks:
-            # Step 1: Clean OCR artifacts
+            # Step 1: UI artifact filter
+            if self._is_ui_artifact(text):
+                stats['dropped_ui_artifact'] += 1
+                continue
+
+            # Step 2: Clean OCR artifacts (inline gibberish removal + pipe normalization)
             cleaned = self._clean_ocr_artifacts(text)
-            if not cleaned:
-                stats['dropped_artifact'] += 1
+            if not cleaned or len(cleaned.split()) < 1:
+                stats['dropped_ocr_artifact'] += 1
                 continue
 
-            # Step 2: Split into sentences
-            sentences = self._split_into_sentences(cleaned, min_sentence_words)
-            if not sentences:
-                stats['dropped_artifact'] += 1
+            # Step 2b: Line-level gibberish check — drop frames where too much was garbage
+            # If cleaning removed >50% of words, the original was mostly gibberish
+            original_word_count = len(text.split())
+            cleaned_word_count = len(cleaned.split())
+            if original_word_count > 5 and cleaned_word_count / original_word_count < 0.50:
+                stats['dropped_ocr_artifact'] += 1
+                self.logger.debug(
+                    f"Dropped gibberish-heavy frame: {cleaned_word_count}/{original_word_count} "
+                    f"words survived cleaning"
+                )
                 continue
 
-            stats['total_sentences'] += len(sentences)
+            # Step 2c: Repair truncated speaker names
+            if speaker_repair_map:
+                repaired = self._repair_speaker_names(cleaned, speaker_repair_map)
+                if repaired != cleaned:
+                    stats['speaker_names_repaired'] += 1
+                    cleaned = repaired
 
-            # Step 3: Filter each sentence
-            novel_sentences = []
-            for sentence in sentences:
-                # Protected phrases bypass duplicate and novelty filters
-                is_protected = self._contains_protected_phrase(sentence)
+            # Step 3: Frame consensus
+            frame_buffer.append(cleaned)
+            ts_buffer.append(timestamp)
+            consensus = self._frame_consensus(list(frame_buffer))
+            if consensus is None:
+                stats['dropped_no_consensus'] += 1
+                continue
 
-                # Skip if it's a near-duplicate of a recently seen sentence
-                if not is_protected and self._is_duplicate_sentence(
-                        sentence, seen_sentences, sentence_similarity):
-                    self.logger.debug(f"Post-process: duplicate sentence filtered: '{sentence[:60]}...'")
-                    stats['dropped_duplicate'] += 1
-                    continue
-
-                # Check novelty ratio - are enough words in this sentence truly new?
-                if not is_protected:
-                    novelty = self._calculate_novelty_ratio(sentence, seen_words)
-                    if novelty < novelty_threshold:
-                        self.logger.debug(
-                            f"Post-process: low novelty ({novelty:.2f}): '{sentence[:60]}...'"
-                        )
-                        stats['dropped_low_novelty'] += 1
+            # Step 4: No-downgrade rule
+            if prev_emitted_text:
+                length_ratio = len(consensus) / max(len(prev_emitted_text), 1)
+                if length_ratio < min_length_ratio:
+                    prev_words = set(prev_emitted_text.lower().split())
+                    new_words_set = set(consensus.lower().split()) - prev_words
+                    if len(new_words_set) < min_new_words:
+                        stats['dropped_no_downgrade'] += 1
                         continue
 
-                if is_protected:
-                    self.logger.debug(f"Post-process: protected phrase kept: '{sentence[:60]}...'")
-                    stats['kept_protected'] += 1
+            # Step 5: Hysteresis dedup
+            if prev_emitted_text:
+                similarity = self.calculate_similarity(consensus, prev_emitted_text)
+                if not in_dedup_mode and similarity >= dedup_enter:
+                    in_dedup_mode = True
+                    stats['dropped_hysteresis_dedup'] += 1
+                    continue
+                elif in_dedup_mode and similarity > dedup_exit:
+                    stats['dropped_hysteresis_dedup'] += 1
+                    continue
+                elif in_dedup_mode and similarity <= dedup_exit:
+                    in_dedup_mode = False
+
+            # Step 6: Prefix/suffix overlap dedup
+            novel_text = consensus
+            if prev_emitted_text:
+                prefix_end, suffix_start = self._find_overlap_boundary(prev_emitted_text, consensus)
+                original_words = consensus.split()
+                novel_words = original_words[prefix_end:suffix_start]
+                if novel_words:
+                    novel_text = ' '.join(novel_words)
+                    if prefix_end > 0 or suffix_start < len(original_words):
+                        stats['merges_performed'] += 1
                 else:
-                    stats['kept_novel'] += 1
+                    stats['dropped_empty_novel'] += 1
+                    continue
 
-                novel_sentences.append(sentence)
-                seen_sentences.appendleft(sentence)
-                seen_words.update(self._get_word_set(sentence))
+            # Step 7: Sentence splitting
+            sentences = self._split_into_sentences(novel_text, min_sentence_words)
+            if not sentences:
+                if len(novel_text.split()) >= min_sentence_words:
+                    sentences = [novel_text]
+                else:
+                    stats['dropped_empty_novel'] += 1
+                    continue
 
-            # Step 4: If any novel sentences remain, add as a result block
-            if novel_sentences:
-                combined_text = '. '.join(novel_sentences)
-                # Ensure proper sentence ending
-                if combined_text and not combined_text.endswith(('.', '!', '?')):
-                    combined_text += '.'
-                result_blocks.append((timestamp, combined_text))
+            # Step 8: Emit
+            combined = '. '.join(sentences)
+            if combined and not combined.endswith(('.', '!', '?')):
+                combined += '.'
+            result_blocks.append((timestamp, combined))
+            prev_emitted_text = consensus
+            stats['chunks_emitted'] += 1
+
+        # Detect possible drops: gaps > 30s with dissimilar content
+        for i in range(1, len(result_blocks)):
+            prev_ts = result_blocks[i - 1][0]
+            curr_ts = result_blocks[i][0]
+            try:
+                from datetime import datetime
+                fmt = '[%H:%M:%S]'
+                t1 = datetime.strptime(prev_ts, fmt)
+                t2 = datetime.strptime(curr_ts, fmt)
+                gap = (t2 - t1).total_seconds()
+                if gap > 30:
+                    sim = self.calculate_similarity(result_blocks[i - 1][1], result_blocks[i][1])
+                    if sim < 0.3:
+                        stats['possible_drops_detected'] += 1
+            except (ValueError, TypeError):
+                pass
 
         self.logger.info(
-            f"Post-process: {len(text_blocks)} -> {len(result_blocks)} blocks "
-            f"({len(text_blocks) - len(result_blocks)} blocks removed)"
-        )
-        self.logger.info(
-            f"Post-process stats: {stats['total_sentences']} sentences evaluated, "
-            f"{stats['dropped_duplicate']} duplicate, {stats['dropped_low_novelty']} low-novelty, "
-            f"{stats['dropped_artifact']} artifact blocks, {stats['kept_protected']} protected"
+            f"Post-process: {stats['total_frames']} frames -> {stats['chunks_emitted']} chunks. "
+            f"Dropped: {stats['dropped_ui_artifact']} UI, {stats['dropped_ocr_artifact']} OCR, "
+            f"{stats['dropped_no_consensus']} no-consensus, {stats['dropped_no_downgrade']} no-downgrade, "
+            f"{stats['dropped_hysteresis_dedup']} hysteresis, {stats['dropped_empty_novel']} empty-novel. "
+            f"Merges: {stats['merges_performed']}. Speaker repairs: {stats['speaker_names_repaired']}. "
+            f"Possible drops: {stats['possible_drops_detected']}."
         )
 
-        # Store stats for external access (e.g., processed file header)
         self._last_post_process_stats = stats
 
         return result_blocks

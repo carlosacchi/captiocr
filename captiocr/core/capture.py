@@ -103,17 +103,16 @@ class ScreenCapture:
         filename = self.file_manager.create_capture_filename(self.current_capture_timestamp)
         self.output_file_path = CAPTURES_DIR / filename
         
-        # Write header
+        # Write header with full runtime parameters for audit/A/B comparison
         with open(self.output_file_path, 'w', encoding='utf-8') as f:
             f.write(f"Caption capture started: {datetime.now()}\n")
             f.write(f"Language: {language}\n")
             f.write(f"Caption mode: {caption_mode}\n")
             f.write(f"Version: {APP_VERSION}\n")
-            f.write(f"\n--- Sensitivity Configuration ---\n")
-            f.write(f"Minimum Delta Words: {self.capture_config.min_delta_words}\n")
-            f.write(f"Comparison Window: {self.capture_config.recent_texts_window_size}\n")
-            f.write(f"Buffer Flush Threshold: {self.capture_config.delta_buffer_threshold}\n")
-            f.write(f"Incremental Detection: {int(self.capture_config.incremental_threshold * 100)}%\n\n")
+            f.write(f"Similarity threshold: {self.text_processor.similarity_threshold}\n")
+            f.write(f"Min capture interval: {self.capture_config.min_capture_interval:.1f}s\n")
+            f.write(f"Max capture interval: {self.capture_config.max_capture_interval:.1f}s\n")
+            f.write(f"Clean text mode: raw\n\n")
         
         # Start capture thread
         self.capture_thread = threading.Thread(
@@ -161,19 +160,32 @@ class ScreenCapture:
         """
         Main capture loop running in a separate thread.
 
+        Recall-first strategy: write the full OCR text whenever it differs enough
+        from the previous capture. No delta extraction, no buffering. All smart
+        deduplication happens in post-processing, not here.
+
         Args:
             language: Language code for OCR
             caption_mode: Whether to use caption-optimized settings
         """
+        # Live capture metrics
+        metrics = {
+            'total_ocr_frames': 0,
+            'written_frames': 0,
+            'dropped_similarity': 0,
+            'dropped_empty': 0,
+            'dropped_ui_artifact': 0,
+        }
+
         try:
-            # Keep a window of recent texts to catch A-B-A redundancy patterns
-            recent_texts = deque(maxlen=self.capture_config.recent_texts_window_size)
-
-            # Buffer for accumulating small deltas
-            delta_buffer = []
-
+            last_text = ""
             similar_captures_count = 0
             capture_interval = self.capture_config.reset_interval()
+
+            # Wait for selection overlay to fully disappear before first OCR
+            self.stop_event.wait(timeout=0.5)
+            if self.capture_stop_flag:
+                return
 
             while not self.capture_stop_flag:
                 try:
@@ -182,162 +194,115 @@ class ScreenCapture:
                         self.logger.warning("Capture area no longer valid, stopping capture")
                         self.capture_stop_flag = True
                         break
-                    
+
                     # Capture screenshot
                     x1, y1, x2, y2 = self.capture_area
-                    
+
                     # Check if we need multi-monitor capture
                     needs_multi_monitor_capture = False
-                    
+
                     if self.monitor_manager and self.monitor_manager.has_multi_monitor():
                         # For multi-monitor setups, always use all_screens=True
                         needs_multi_monitor_capture = True
-                        self.logger.debug(f"Multi-monitor setup detected, using all_screens=True for: {self.capture_area}")
+                        self.logger.debug(
+                            f"Multi-monitor setup detected, using all_screens=True for: {self.capture_area}"
+                        )
                     elif x1 < 0 or y1 < 0:
-                        # Legacy fallback for negative coordinates (shouldn't happen with monitor manager)
+                        # Legacy fallback for negative coordinates
                         needs_multi_monitor_capture = True
-                        self.logger.debug(f"Negative coordinates detected, using all_screens=True for: {self.capture_area}")
-                    
+                        self.logger.debug(
+                            f"Negative coordinates detected, using all_screens=True for: {self.capture_area}"
+                        )
+
                     if needs_multi_monitor_capture:
-                        # Try to capture with ImageGrab all_screens parameter for multi-monitor
                         try:
                             screenshot = ImageGrab.grab(bbox=self.capture_area, all_screens=True)
-                            self.logger.debug(f"Successfully captured with all_screens=True")
+                            self.logger.debug("Successfully captured with all_screens=True")
                         except Exception as e:
                             self.logger.error(f"Failed to capture with all_screens=True: {e}")
-                            # Fallback: try without bbox to get full desktop, then crop
                             try:
                                 full_screenshot = ImageGrab.grab(all_screens=True)
-                                # Get virtual screen bounds
                                 if self.monitor_manager:
                                     vx, vy, vw, vh = self.monitor_manager.get_virtual_screen_bounds()
-                                    # Convert capture area to relative coordinates
                                     rel_x1 = x1 - vx
                                     rel_y1 = y1 - vy
                                     rel_x2 = x2 - vx
                                     rel_y2 = y2 - vy
                                     screenshot = full_screenshot.crop((rel_x1, rel_y1, rel_x2, rel_y2))
-                                    self.logger.debug(f"Cropped from full screenshot: {rel_x1},{rel_y1},{rel_x2},{rel_y2}")
+                                    self.logger.debug(
+                                        f"Cropped from full screenshot: {rel_x1},{rel_y1},{rel_x2},{rel_y2}"
+                                    )
                                 else:
                                     raise Exception("No monitor manager available for coordinate conversion")
                             except Exception as e2:
                                 self.logger.error(f"All capture methods failed: {e2}")
-                                continue  # Skip this capture attempt
+                                continue
                     else:
                         # Single monitor setup - standard capture
-                        self.logger.debug(f"Single monitor setup, using standard capture for: {self.capture_area}")
+                        self.logger.debug(
+                            f"Single monitor setup, using standard capture for: {self.capture_area}"
+                        )
                         screenshot = ImageGrab.grab(bbox=self.capture_area)
-                    
+
                     # Optimize image if needed
                     screenshot = self.ocr_processor.optimize_image_for_ocr(screenshot)
-                    
+
                     # Perform OCR
-                    raw_text = self.ocr_processor.process_image(
-                        screenshot, language, caption_mode
-                    )
+                    raw_text = self.ocr_processor.process_image(screenshot, language, caption_mode)
                     self.logger.debug(f"Raw OCR result (length: {len(raw_text)}): '{raw_text[:100]}...'")
-                    
-                    # Extract new content using delta extraction with window of recent texts
-                    new_content = self.text_processor.extract_new_content(
-                        raw_text,
-                        list(recent_texts),
-                        min_delta_words=self.capture_config.min_delta_words
-                    )
-                    self.logger.debug(
-                        f"Delta extraction result: "
-                        f"{'found' if new_content else 'no new content'} "
-                        f"(length: {len(new_content) if new_content else 0})"
-                    )
+                    metrics['total_ocr_frames'] += 1
 
-                    if new_content:
-                        # Count words in new content
-                        word_count = len(new_content.split())
+                    # Clean text (control chars/whitespace only — no semantic filtering)
+                    cleaned_text = self.text_processor.clean_text_raw(raw_text)
 
-                        # If delta is small (< min_delta_words), add to buffer instead of saving immediately
-                        if word_count < self.capture_config.min_delta_words:
-                            delta_buffer.append(new_content)
-                            self.logger.debug(
-                                f"Added to buffer ({word_count} words): '{new_content}' "
-                                f"(buffer size: {len(delta_buffer)})"
-                            )
-                        else:
-                            # Flush buffer if it has content
-                            content_to_save = new_content
-                            if delta_buffer:
-                                buffered_content = ' '.join(delta_buffer)
-                                content_to_save = f"{buffered_content} {new_content}"
-                                self.logger.debug(
-                                    f"Flushing buffer with {len(delta_buffer)} fragments"
-                                )
-                                delta_buffer.clear()
+                    if not cleaned_text or not cleaned_text.strip():
+                        metrics['dropped_empty'] += 1
+                        continue
 
-                            # Save to file
-                            with open(self.output_file_path, 'a', encoding='utf-8') as f:
-                                timestamp = datetime.now().strftime('%H:%M:%S')
-                                f.write(f"[{timestamp}] {content_to_save}\n")
+                    # Skip UI overlay artifacts (Press ESC, Click and drag, etc.)
+                    if self.text_processor._is_ui_artifact(cleaned_text):
+                        self.logger.debug("Skipped UI artifact frame")
+                        metrics['dropped_ui_artifact'] += 1
+                        continue
 
-                            self.text_history.append(content_to_save)
-                            similar_captures_count = 0
-                            capture_interval = self.capture_config.reset_interval()
+                    # Write full text if meaningfully different from last capture
+                    if self.text_processor.has_significant_new_content(cleaned_text, last_text):
+                        with open(self.output_file_path, 'a', encoding='utf-8') as f:
+                            timestamp = datetime.now().strftime('%H:%M:%S')
+                            f.write(f"[{timestamp}] {cleaned_text}\n")
 
-                            # Notify callbacks with the content (including buffer)
-                            if self.on_text_captured:
-                                self.on_text_captured(content_to_save)
+                        last_text = cleaned_text
+                        self.text_history.append(cleaned_text)
+                        similar_captures_count = 0
+                        capture_interval = self.capture_config.reset_interval()
+                        metrics['written_frames'] += 1
 
-                            self.logger.debug(f"Captured new content: {content_to_save[:50]}...")
+                        if self.on_text_captured:
+                            self.on_text_captured(cleaned_text)
 
-                        # Always update recent_texts window with full cleaned text
-                        full_text = self.text_processor.clean_text(raw_text)
-                        recent_texts.appendleft(full_text)
+                        self.logger.debug(f"Captured: {cleaned_text[:80]}...")
                     else:
-                        # No new content - check if we should flush buffer anyway
-                        if len(delta_buffer) >= self.capture_config.delta_buffer_threshold:
-                            # Enough fragments accumulated - flush buffer
-                            buffered_content = ' '.join(delta_buffer)
-                            with open(self.output_file_path, 'a', encoding='utf-8') as f:
-                                timestamp = datetime.now().strftime('%H:%M:%S')
-                                f.write(f"[{timestamp}] {buffered_content}\n")
+                        # No significant change — slow down polling if screen is static
+                        similar_captures_count += 1
+                        metrics['dropped_similarity'] += 1
+                        if similar_captures_count > self.capture_config.max_similar_captures:
+                            capture_interval = self.capture_config.increase_interval()
 
-                            self.logger.debug(
-                                f"Flushed buffer after no new content "
-                                f"({len(delta_buffer)} fragments)"
-                            )
-
-                            self.text_history.append(buffered_content)
-                            if self.on_text_captured:
-                                self.on_text_captured(buffered_content)
-
-                            delta_buffer.clear()
-                            similar_captures_count = 0
-                            capture_interval = self.capture_config.reset_interval()
-                        else:
-                            # Adjust interval for repeated content
-                            similar_captures_count += 1
-                            if similar_captures_count > self.capture_config.max_similar_captures:
-                                capture_interval = self.capture_config.increase_interval()
-                    
-                    # Sleep based on current interval, but wake immediately on stop signal
+                    # Sleep based on current interval, wake immediately on stop signal
                     self.stop_event.wait(timeout=capture_interval)
 
                 except Exception as e:
                     self.logger.error(f"Error in capture iteration: {e}")
-                    self.stop_event.wait(timeout=1)  # Sleep on error to avoid rapid loops
-            
-            # Flush any remaining buffered fragments before exiting
-            if delta_buffer:
-                buffered_content = ' '.join(delta_buffer)
-                try:
-                    with open(self.output_file_path, 'a', encoding='utf-8') as f:
-                        timestamp = datetime.now().strftime('%H:%M:%S')
-                        f.write(f"[{timestamp}] {buffered_content}\n")
-                    self.logger.info(f"Flushed {len(delta_buffer)} remaining buffer fragments on stop")
-                    if self.on_text_captured:
-                        self.on_text_captured(buffered_content)
-                except Exception as e:
-                    self.logger.error(f"Error flushing buffer on stop: {e}")
-                delta_buffer.clear()
+                    self.stop_event.wait(timeout=1)
 
-            self.logger.info("Capture loop ended")
+            self.logger.info(
+                f"Capture loop ended. Metrics: "
+                f"total_ocr={metrics['total_ocr_frames']}, "
+                f"written={metrics['written_frames']}, "
+                f"dropped_similarity={metrics['dropped_similarity']}, "
+                f"dropped_empty={metrics['dropped_empty']}, "
+                f"dropped_ui_artifact={metrics['dropped_ui_artifact']}"
+            )
 
         except Exception as e:
             self.logger.error(f"Critical error in capture loop: {e}")
@@ -470,12 +435,14 @@ class ScreenCapture:
                     text = ''.join(block).replace(timestamp, '').strip()
                     text_blocks.append((timestamp, text))
 
-            # Use aggressive post-processing for sentence-level deduplication
+            # Recall-first post-processing pipeline
             unique_blocks = self.text_processor.filter_duplicate_blocks_aggressive(
                 text_blocks,
-                sentence_similarity=self.capture_config.post_process_sentence_similarity,
-                novelty_threshold=self.capture_config.post_process_novelty_threshold,
-                global_window=self.capture_config.post_process_global_window_size,
+                dedup_enter=self.capture_config.post_process_dedup_enter,
+                dedup_exit=self.capture_config.post_process_dedup_exit,
+                min_length_ratio=self.capture_config.post_process_min_length_ratio,
+                min_new_words=self.capture_config.post_process_min_new_words,
+                frame_window=self.capture_config.post_process_frame_window,
                 min_sentence_words=self.capture_config.post_process_min_sentence_words
             )
 
@@ -503,12 +470,17 @@ class ScreenCapture:
                 stats = getattr(self.text_processor, '_last_post_process_stats', None)
                 if stats:
                     f.write(f"\n--- Processing Diagnostics ---\n")
-                    f.write(f"Sentences evaluated: {stats['total_sentences']}\n")
-                    f.write(f"Dropped (duplicate): {stats['dropped_duplicate']}\n")
-                    f.write(f"Dropped (low novelty): {stats['dropped_low_novelty']}\n")
-                    f.write(f"Dropped (artifact/empty): {stats['dropped_artifact']}\n")
-                    f.write(f"Kept (protected phrase): {stats['kept_protected']}\n")
-                    f.write(f"Kept (novel): {stats['kept_novel']}\n")
+                    f.write(f"Total frames: {stats['total_frames']}\n")
+                    f.write(f"Chunks emitted: {stats['chunks_emitted']}\n")
+                    f.write(f"Dropped (UI artifact): {stats['dropped_ui_artifact']}\n")
+                    f.write(f"Dropped (OCR artifact): {stats['dropped_ocr_artifact']}\n")
+                    f.write(f"Dropped (no consensus): {stats['dropped_no_consensus']}\n")
+                    f.write(f"Dropped (no-downgrade): {stats['dropped_no_downgrade']}\n")
+                    f.write(f"Dropped (hysteresis dedup): {stats['dropped_hysteresis_dedup']}\n")
+                    f.write(f"Dropped (empty after overlap): {stats['dropped_empty_novel']}\n")
+                    f.write(f"Merges performed: {stats['merges_performed']}\n")
+                    f.write(f"Speaker names repaired: {stats.get('speaker_names_repaired', 0)}\n")
+                    f.write(f"Possible drops detected: {stats['possible_drops_detected']}\n")
 
                 f.write(f"\n{'=' * 60}\n\n")
 

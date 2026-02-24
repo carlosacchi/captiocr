@@ -278,7 +278,7 @@ class IntervalConfigDialog(DialogBase):
         ttk.Spinbox(
             max_frame,
             from_=1,
-            to=10,
+            to=8,
             increment=0.5,
             textvariable=self.max_var,
             width=8
@@ -301,7 +301,11 @@ class IntervalConfigDialog(DialogBase):
         # Info
         ttk.Label(
             frame,
-            text="Lower values = more responsive but use more resources\nHigher values = save resources but may miss brief text",
+            text=(
+                "Recall-first: lower intervals capture more text.\n"
+                "Recommended: Min 3.0s, Max 4.0s for best coverage.\n"
+                "Higher values save resources but may miss brief speech."
+            ),
             font=("Arial", 9),
             foreground="gray",
             justify=tk.CENTER
@@ -343,264 +347,11 @@ class IntervalConfigDialog(DialogBase):
             messagebox.showerror("Error", f"Failed to save settings: {e}")
 
 
-class SensitivityConfigDialog(DialogBase):
-    """Dialog for configuring delta extraction sensitivity."""
-
-    def __init__(self, parent: tk.Tk, capture_config: CaptureConfig, settings=None):
-        """Initialize sensitivity configuration dialog."""
-        super().__init__(parent, "Configure Capture Sensitivity", 550, 650)
-        self.capture_config = capture_config
-        self.settings = settings
-
-    def show(self) -> None:
-        """Show the configuration dialog."""
-        # Create dialog using base class
-        self.create_dialog()
-
-        # Create main frame and title
-        frame = self.create_main_frame()
-        self.create_title_label(frame, "Configure Capture Sensitivity")
-
-        ttk.Label(
-            frame,
-            text="Adjust how the application detects and filters duplicate content",
-            font=("Arial", 9),
-            foreground="gray"
-        ).pack(pady=(0, 15))
-
-        # Minimum Delta Words
-        min_delta_frame = ttk.Frame(frame)
-        min_delta_frame.pack(fill=tk.X, pady=8)
-        ttk.Label(min_delta_frame, text="Minimum Delta Words:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.min_delta_var = tk.IntVar(value=self.capture_config.min_delta_words)
-        ttk.Spinbox(
-            min_delta_frame,
-            from_=2,
-            to=10,
-            increment=1,
-            textvariable=self.min_delta_var,
-            width=10
-        ).pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            min_delta_frame,
-            text="⓵ Min words for new content",
-            font=("Arial", 8),
-            foreground="gray"
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(
-            frame,
-            text="   Lower = captures smaller fragments\n   Higher = filters out small changes",
-            font=("Arial", 8),
-            foreground="#555",
-            justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
-
-        # Recent Texts Window Size
-        window_frame = ttk.Frame(frame)
-        window_frame.pack(fill=tk.X, pady=8)
-        ttk.Label(window_frame, text="Comparison Window:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.window_var = tk.IntVar(value=self.capture_config.recent_texts_window_size)
-        ttk.Spinbox(
-            window_frame,
-            from_=3,
-            to=10,
-            increment=1,
-            textvariable=self.window_var,
-            width=10
-        ).pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            window_frame,
-            text="⓶ Previous captures to check",
-            font=("Arial", 8),
-            foreground="gray"
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(
-            frame,
-            text="   Lower = faster, may miss patterns\n   Higher = better redundancy detection",
-            font=("Arial", 8),
-            foreground="#555",
-            justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
-
-        # Delta Buffer Threshold
-        buffer_frame = ttk.Frame(frame)
-        buffer_frame.pack(fill=tk.X, pady=8)
-        ttk.Label(buffer_frame, text="Buffer Flush Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.buffer_var = tk.IntVar(value=self.capture_config.delta_buffer_threshold)
-        ttk.Spinbox(
-            buffer_frame,
-            from_=2,
-            to=5,
-            increment=1,
-            textvariable=self.buffer_var,
-            width=10
-        ).pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            buffer_frame,
-            text="⓷ Fragments before saving",
-            font=("Arial", 8),
-            foreground="gray"
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(
-            frame,
-            text="   Lower = more frequent saves\n   Higher = waits to combine fragments",
-            font=("Arial", 8),
-            foreground="#555",
-            justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
-
-        # Incremental Threshold
-        threshold_frame = ttk.Frame(frame)
-        threshold_frame.pack(fill=tk.X, pady=8)
-        ttk.Label(threshold_frame, text="Incremental Detection:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.threshold_var = tk.IntVar(value=int(self.capture_config.incremental_threshold * 100))
-        ttk.Spinbox(
-            threshold_frame,
-            from_=50,
-            to=90,
-            increment=5,
-            textvariable=self.threshold_var,
-            width=10
-        ).pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            threshold_frame,
-            text="⓸ % overlap for subtitles",
-            font=("Arial", 8),
-            foreground="gray"
-        ).pack(side=tk.LEFT, padx=5)
-
-        ttk.Label(
-            frame,
-            text="   Lower = more sensitive to changes\n   Higher = stricter incremental detection",
-            font=("Arial", 8),
-            foreground="#555",
-            justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
-
-        # Separator
-        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, pady=15)
-
-        # Info
-        ttk.Label(
-            frame,
-            text="💡 Tip: Start with defaults. Adjust if you see too many fragments or duplicates.",
-            font=("Arial", 9),
-            foreground="#0066cc",
-            justify=tk.CENTER
-        ).pack(pady=10)
-
-        # Buttons using base class
-        btn_frame = self.create_button_frame(frame)
-
-        # Add Reset to Defaults button on the left
-        ttk.Button(
-            btn_frame,
-            text="Reset to Defaults",
-            command=self._on_reset
-        ).pack(side=tk.LEFT, padx=5)
-
-        # Add spacer to push Save/Cancel to the right
-        ttk.Frame(btn_frame).pack(side=tk.LEFT, expand=True)
-
-        self.add_ok_cancel_buttons(
-            btn_frame,
-            ok_text="Save",
-            ok_callback=self._on_save,
-            ok_width=12
-        )
-
-    def _on_reset(self) -> None:
-        """Reset all values to defaults."""
-        from ..config.constants import (
-            DEFAULT_MIN_DELTA_WORDS,
-            DEFAULT_RECENT_TEXTS_WINDOW_SIZE,
-            DEFAULT_DELTA_BUFFER_THRESHOLD,
-            DEFAULT_INCREMENTAL_THRESHOLD
-        )
-
-        self.min_delta_var.set(DEFAULT_MIN_DELTA_WORDS)
-        self.window_var.set(DEFAULT_RECENT_TEXTS_WINDOW_SIZE)
-        self.buffer_var.set(DEFAULT_DELTA_BUFFER_THRESHOLD)
-        self.threshold_var.set(int(DEFAULT_INCREMENTAL_THRESHOLD * 100))
-
-        messagebox.showinfo(
-            "Reset to Defaults",
-            "All values have been reset to default settings.\n"
-            "Click Save to apply these changes."
-        )
-
-    def _on_save(self) -> None:
-        """Handle save button click."""
-        try:
-            # Force update of all spinbox values to ensure they're captured
-            self.dialog.update_idletasks()
-
-            # Get values
-            new_min_delta = int(self.min_delta_var.get())
-            new_window = int(self.window_var.get())
-            new_buffer = int(self.buffer_var.get())
-            new_threshold = float(self.threshold_var.get()) / 100.0
-
-            # Validate values
-            if new_min_delta < 2 or new_min_delta > 10:
-                messagebox.showerror("Invalid Value", "Minimum delta words must be between 2 and 10")
-                return
-            if new_window < 3 or new_window > 10:
-                messagebox.showerror("Invalid Value", "Comparison window must be between 3 and 10")
-                return
-            if new_buffer < 2 or new_buffer > 5:
-                messagebox.showerror("Invalid Value", "Buffer threshold must be between 2 and 5")
-                return
-            if new_threshold < 0.5 or new_threshold > 0.9:
-                messagebox.showerror("Invalid Value", "Incremental threshold must be between 50% and 90%")
-                return
-
-            # Update configuration
-            self.capture_config.min_delta_words = new_min_delta
-            self.capture_config.recent_texts_window_size = new_window
-            self.capture_config.delta_buffer_threshold = new_buffer
-            self.capture_config.incremental_threshold = new_threshold
-
-            # Save settings to persist changes
-            save_success = False
-            if self.settings:
-                save_success = self.settings.save_last_config()
-                if not save_success:
-                    messagebox.showerror(
-                        "Save Error",
-                        "Failed to save settings to disk.\n"
-                        "Settings will be applied for this session only."
-                    )
-
-            # Show confirmation
-            save_msg = "Settings saved to disk." if save_success else "Settings applied (not saved to disk)."
-            messagebox.showinfo(
-                "Settings Updated",
-                f"Sensitivity updated:\n"
-                f"Min Delta Words: {new_min_delta}\n"
-                f"Comparison Window: {new_window}\n"
-                f"Buffer Threshold: {new_buffer}\n"
-                f"Incremental Detection: {int(new_threshold * 100)}%\n\n"
-                f"{save_msg}"
-            )
-
-            # Close the dialog using base class method
-            self.close_dialog()
-
-        except ValueError as e:
-            messagebox.showerror("Invalid Values", f"Please enter valid numbers: {e}")
-        except Exception as e:
-            messagebox.showerror("Error", f"Failed to save settings: {e}")
-
-
 class PostProcessConfigDialog(DialogBase):
-    """Dialog for configuring post-processing deduplication parameters."""
+    """Dialog for configuring the recall-first post-processing pipeline."""
 
     def __init__(self, parent: tk.Tk, capture_config: CaptureConfig, settings=None):
-        super().__init__(parent, "Configure Post-Processing", 550, 680)
+        super().__init__(parent, "Configure Post-Processing", 550, 720)
         self.capture_config = capture_config
         self.settings = settings
 
@@ -616,82 +367,94 @@ class PostProcessConfigDialog(DialogBase):
             font=("Arial", 9), foreground="gray"
         ).pack(pady=(0, 15))
 
-        # --- Sentence Similarity ---
+        # --- Dedup Enter Threshold ---
         row1 = ttk.Frame(frame)
-        row1.pack(fill=tk.X, pady=8)
-        ttk.Label(row1, text="Sentence Similarity:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.similarity_var = tk.IntVar(
-            value=int(self.capture_config.post_process_sentence_similarity * 100))
+        row1.pack(fill=tk.X, pady=6)
+        ttk.Label(row1, text="Dedup Enter Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.dedup_enter_var = tk.IntVar(
+            value=int(self.capture_config.post_process_dedup_enter * 100))
         ttk.Spinbox(row1, from_=50, to=95, increment=5,
-                    textvariable=self.similarity_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row1, text="% fuzzy match", font=("Arial", 8),
+                    textvariable=self.dedup_enter_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row1, text="% similarity to suppress", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Lower = more aggressive duplicate removal, may drop valid variations\n"
-                 "   Higher = keeps more sentence variations, less deduplication",
+            text="   Similarity above this starts suppressing duplicate frames",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
+        ).pack(anchor='w', pady=(0, 6))
 
-        # --- Novelty Threshold ---
+        # --- Dedup Exit Threshold ---
         row2 = ttk.Frame(frame)
-        row2.pack(fill=tk.X, pady=8)
-        ttk.Label(row2, text="Novelty Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.novelty_var = tk.IntVar(
-            value=int(self.capture_config.post_process_novelty_threshold * 100))
-        ttk.Spinbox(row2, from_=5, to=50, increment=5,
-                    textvariable=self.novelty_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row2, text="% new content words", font=("Arial", 8),
+        row2.pack(fill=tk.X, pady=6)
+        ttk.Label(row2, text="Dedup Exit Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.dedup_exit_var = tk.IntVar(
+            value=int(self.capture_config.post_process_dedup_exit * 100))
+        ttk.Spinbox(row2, from_=30, to=80, increment=5,
+                    textvariable=self.dedup_exit_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row2, text="% similarity to resume", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Lower = keeps sentences even with few new words, more complete output\n"
-                 "   Higher = requires more unique words per sentence, stricter filtering",
+            text="   Similarity below this resumes emitting (must be < enter threshold)",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
+        ).pack(anchor='w', pady=(0, 6))
+
+        # --- Min Length Ratio ---
+        row3 = ttk.Frame(frame)
+        row3.pack(fill=tk.X, pady=6)
+        ttk.Label(row3, text="Min Length Ratio:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.length_ratio_var = tk.IntVar(
+            value=int(self.capture_config.post_process_min_length_ratio * 100))
+        ttk.Spinbox(row3, from_=30, to=90, increment=10,
+                    textvariable=self.length_ratio_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row3, text="% of previous length", font=("Arial", 8),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            frame,
+            text="   No-downgrade: skip frames shorter than this ratio vs previous",
+            font=("Arial", 8), foreground="#555", justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 6))
+
+        # --- Frame Consensus Window ---
+        row4 = ttk.Frame(frame)
+        row4.pack(fill=tk.X, pady=6)
+        ttk.Label(row4, text="Frame Consensus:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.frame_window_var = tk.IntVar(
+            value=self.capture_config.post_process_frame_window)
+        ttk.Spinbox(row4, from_=2, to=5, increment=1,
+                    textvariable=self.frame_window_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row4, text="consecutive frames", font=("Arial", 8),
+                  foreground="gray").pack(side=tk.LEFT, padx=5)
+        ttk.Label(
+            frame,
+            text="   Emit only when content is stable across this many frames",
+            font=("Arial", 8), foreground="#555", justify=tk.LEFT
+        ).pack(anchor='w', pady=(0, 6))
 
         # --- Min Sentence Words ---
-        row3 = ttk.Frame(frame)
-        row3.pack(fill=tk.X, pady=8)
-        ttk.Label(row3, text="Min Sentence Words:", width=22, anchor='w').pack(side=tk.LEFT)
+        row5 = ttk.Frame(frame)
+        row5.pack(fill=tk.X, pady=6)
+        ttk.Label(row5, text="Min Sentence Words:", width=22, anchor='w').pack(side=tk.LEFT)
         self.min_words_var = tk.IntVar(
             value=self.capture_config.post_process_min_sentence_words)
-        ttk.Spinbox(row3, from_=2, to=10, increment=1,
+        ttk.Spinbox(row5, from_=1, to=5, increment=1,
                     textvariable=self.min_words_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row3, text="words minimum", font=("Arial", 8),
+        ttk.Label(row5, text="words minimum", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Lower = keeps short fragments (e.g. names, brief replies)\n"
-                 "   Higher = filters out short fragments, cleaner but may lose context",
+            text="   Lower = keeps short replies (Sure, Yes). Higher = cleaner output",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
-
-        # --- Global Window Size ---
-        row4 = ttk.Frame(frame)
-        row4.pack(fill=tk.X, pady=8)
-        ttk.Label(row4, text="Global Window Size:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.window_var = tk.IntVar(
-            value=self.capture_config.post_process_global_window_size)
-        ttk.Spinbox(row4, from_=10, to=100, increment=10,
-                    textvariable=self.window_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row4, text="recent sentences", font=("Arial", 8),
-                  foreground="gray").pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            frame,
-            text="   Lower = shorter memory, faster processing, may miss distant duplicates\n"
-                 "   Higher = broader dedup scope, catches more repetitions across the file",
-            font=("Arial", 8), foreground="#555", justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 10))
+        ).pack(anchor='w', pady=(0, 6))
 
         # --- Separator and tip ---
-        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, pady=15)
+        ttk.Separator(frame, orient='horizontal').pack(fill=tk.X, pady=10)
         ttk.Label(
             frame,
             text="Tip: These settings affect only post-processing of saved capture files.\n"
                  "They do not change live capture behavior.",
             font=("Arial", 9), foreground="#0066cc", justify=tk.CENTER
-        ).pack(pady=10)
+        ).pack(pady=8)
 
         # --- Buttons ---
         btn_frame = self.create_button_frame(frame)
@@ -704,15 +467,17 @@ class PostProcessConfigDialog(DialogBase):
     def _on_reset(self) -> None:
         """Reset all values to defaults."""
         from ..config.constants import (
-            POST_PROCESS_SENTENCE_SIMILARITY,
-            POST_PROCESS_NOVELTY_THRESHOLD,
-            POST_PROCESS_MIN_SENTENCE_WORDS,
-            POST_PROCESS_GLOBAL_WINDOW_SIZE
+            POST_PROCESS_DEDUP_ENTER_THRESHOLD,
+            POST_PROCESS_DEDUP_EXIT_THRESHOLD,
+            POST_PROCESS_MIN_LENGTH_RATIO,
+            POST_PROCESS_FRAME_CONSENSUS_WINDOW,
+            POST_PROCESS_MIN_SENTENCE_WORDS
         )
-        self.similarity_var.set(int(POST_PROCESS_SENTENCE_SIMILARITY * 100))
-        self.novelty_var.set(int(POST_PROCESS_NOVELTY_THRESHOLD * 100))
+        self.dedup_enter_var.set(int(POST_PROCESS_DEDUP_ENTER_THRESHOLD * 100))
+        self.dedup_exit_var.set(int(POST_PROCESS_DEDUP_EXIT_THRESHOLD * 100))
+        self.length_ratio_var.set(int(POST_PROCESS_MIN_LENGTH_RATIO * 100))
+        self.frame_window_var.set(POST_PROCESS_FRAME_CONSENSUS_WINDOW)
         self.min_words_var.set(POST_PROCESS_MIN_SENTENCE_WORDS)
-        self.window_var.set(POST_PROCESS_GLOBAL_WINDOW_SIZE)
         messagebox.showinfo(
             "Reset to Defaults",
             "All values have been reset to default settings.\n"
@@ -724,34 +489,45 @@ class PostProcessConfigDialog(DialogBase):
         try:
             self.dialog.update_idletasks()
 
-            new_similarity = float(self.similarity_var.get()) / 100.0
-            new_novelty = float(self.novelty_var.get()) / 100.0
+            new_dedup_enter = float(self.dedup_enter_var.get()) / 100.0
+            new_dedup_exit = float(self.dedup_exit_var.get()) / 100.0
+            new_length_ratio = float(self.length_ratio_var.get()) / 100.0
+            new_frame_window = int(self.frame_window_var.get())
             new_min_words = int(self.min_words_var.get())
-            new_window = int(self.window_var.get())
 
             # Validate ranges
-            if not (0.50 <= new_similarity <= 0.95):
+            if not (0.50 <= new_dedup_enter <= 0.95):
                 messagebox.showerror("Invalid Value",
-                                     "Sentence Similarity must be between 50% and 95%.")
+                                     "Dedup Enter Threshold must be between 50% and 95%.")
                 return
-            if not (0.05 <= new_novelty <= 0.50):
+            if not (0.30 <= new_dedup_exit <= 0.80):
                 messagebox.showerror("Invalid Value",
-                                     "Novelty Threshold must be between 5% and 50%.")
+                                     "Dedup Exit Threshold must be between 30% and 80%.")
                 return
-            if not (2 <= new_min_words <= 10):
+            if new_dedup_exit >= new_dedup_enter:
                 messagebox.showerror("Invalid Value",
-                                     "Min Sentence Words must be between 2 and 10.")
+                                     "Dedup Exit must be lower than Dedup Enter\n"
+                                     "(hysteresis gap required).")
                 return
-            if not (10 <= new_window <= 100):
+            if not (0.30 <= new_length_ratio <= 0.90):
                 messagebox.showerror("Invalid Value",
-                                     "Global Window Size must be between 10 and 100.")
+                                     "Min Length Ratio must be between 30% and 90%.")
+                return
+            if not (2 <= new_frame_window <= 5):
+                messagebox.showerror("Invalid Value",
+                                     "Frame Consensus must be between 2 and 5.")
+                return
+            if not (1 <= new_min_words <= 5):
+                messagebox.showerror("Invalid Value",
+                                     "Min Sentence Words must be between 1 and 5.")
                 return
 
             # Apply to config
-            self.capture_config.post_process_sentence_similarity = new_similarity
-            self.capture_config.post_process_novelty_threshold = new_novelty
+            self.capture_config.post_process_dedup_enter = new_dedup_enter
+            self.capture_config.post_process_dedup_exit = new_dedup_exit
+            self.capture_config.post_process_min_length_ratio = new_length_ratio
+            self.capture_config.post_process_frame_window = new_frame_window
             self.capture_config.post_process_min_sentence_words = new_min_words
-            self.capture_config.post_process_global_window_size = new_window
 
             # Persist
             save_success = False
@@ -768,10 +544,11 @@ class PostProcessConfigDialog(DialogBase):
             messagebox.showinfo(
                 "Settings Updated",
                 f"Post-processing updated:\n"
-                f"Sentence Similarity: {int(new_similarity * 100)}%\n"
-                f"Novelty Threshold: {int(new_novelty * 100)}%\n"
-                f"Min Sentence Words: {new_min_words}\n"
-                f"Global Window Size: {new_window}\n\n"
+                f"Dedup Enter: {int(new_dedup_enter * 100)}%\n"
+                f"Dedup Exit: {int(new_dedup_exit * 100)}%\n"
+                f"Min Length Ratio: {int(new_length_ratio * 100)}%\n"
+                f"Frame Consensus: {new_frame_window}\n"
+                f"Min Sentence Words: {new_min_words}\n\n"
                 f"{save_msg}"
             )
 

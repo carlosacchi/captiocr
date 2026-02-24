@@ -25,10 +25,10 @@ MAIN_WINDOW_ALPHA = 0.92
 
 # Capture Configuration
 DEFAULT_MIN_CAPTURE_INTERVAL = 3.0  # seconds
-DEFAULT_MAX_CAPTURE_INTERVAL = 6.0  # seconds
+DEFAULT_MAX_CAPTURE_INTERVAL = 4.0  # seconds (recall-first: tighter sampling)
 MAX_SIMILAR_CAPTURES = 1
-TEXT_SIMILARITY_THRESHOLD = 0.8
-MIN_TEXT_LENGTH = 10
+TEXT_SIMILARITY_THRESHOLD = 0.85  # Raw capture: recall-first (higher = less aggressive dedup)
+MIN_TEXT_LENGTH = 10  # Used only in post-processing delta extraction
 MIN_CAPTURE_AREA_SIZE = 70  # pixels
 
 # Delta Extraction Sensitivity Configuration
@@ -37,11 +37,13 @@ DEFAULT_RECENT_TEXTS_WINDOW_SIZE = 5  # Number of previous captures to compare
 DEFAULT_DELTA_BUFFER_THRESHOLD = 3  # Fragments to accumulate before flushing
 DEFAULT_INCREMENTAL_THRESHOLD = 0.7  # Percentage overlap for incremental detection (70%)
 
-# Post-Processing Configuration (sentence-level deduplication for processed files)
-POST_PROCESS_SENTENCE_SIMILARITY = 0.80  # Fuzzy match threshold for sentence-level dedup
-POST_PROCESS_NOVELTY_THRESHOLD = 0.10  # Min ratio of new content words vs total to keep a sentence
-POST_PROCESS_MIN_SENTENCE_WORDS = 3  # Minimum words for a sentence to be considered meaningful
-POST_PROCESS_GLOBAL_WINDOW_SIZE = 50  # Number of recent sentences to compare against globally
+# Post-Processing Configuration (recall-first pipeline for processed files)
+POST_PROCESS_DEDUP_ENTER_THRESHOLD = 0.75  # Enter dedup mode when similarity >= this
+POST_PROCESS_DEDUP_EXIT_THRESHOLD = 0.60  # Exit dedup mode when similarity <= this
+POST_PROCESS_MIN_LENGTH_RATIO = 0.60  # No-downgrade rule: skip if new < this * previous length
+POST_PROCESS_MIN_NEW_WORDS = 3  # No-downgrade rule: minimum new words to accept a shorter frame
+POST_PROCESS_FRAME_CONSENSUS_WINDOW = 3  # Emit only when content appears in N-1 of N frames
+POST_PROCESS_MIN_SENTENCE_WORDS = 2  # Minimum words for a sentence to be considered meaningful
 
 # UI Configuration
 CAPTURE_WINDOW_ALPHA = 0.1  # Semi-transparent - control frame visible, capture area distinguishable

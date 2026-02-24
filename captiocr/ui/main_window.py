@@ -4,12 +4,13 @@ Main application window.
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import re
+from datetime import datetime
 from typing import Optional
 import keyboard
 from .selection_window import SelectionWindow
 from .capture_window import CaptureWindow
 from .dialogs import (SettingsDialog, LanguageDownloadDialog, IntervalConfigDialog,
-                      SensitivityConfigDialog, PostProcessConfigDialog)
+                      PostProcessConfigDialog)
 from ..core.ocr import OCRProcessor
 from ..core.capture import ScreenCapture
 from ..core.text_processor import TextProcessor
@@ -179,10 +180,6 @@ class MainWindow:
         settings_menu.add_command(
             label="Configure Capture Interval...",
             command=self._configure_interval
-        )
-        settings_menu.add_command(
-            label="Configure Capture Sensitivity...",
-            command=self._configure_sensitivity
         )
         settings_menu.add_command(
             label="Configure Post-Processing...",
@@ -676,11 +673,6 @@ class MainWindow:
         # Update interval display after dialog closes
         self.interval_status_var.set(f"Interval: {self.capture_config.min_capture_interval:.1f}s")
 
-    def _configure_sensitivity(self) -> None:
-        """Open sensitivity configuration dialog."""
-        dialog = SensitivityConfigDialog(self.root, self.capture_config, self.settings)
-        dialog.show()
-
     def _configure_post_processing(self) -> None:
         """Open post-processing configuration dialog."""
         dialog = PostProcessConfigDialog(self.root, self.capture_config, self.settings)
@@ -760,78 +752,120 @@ and subtitles from video conferencing applications.
 Developed by: {app_info.author}
 Website: {app_info.url}
 
-© 2025 - OCR caption capture solution"""
+© {datetime.now().year} - OCR caption capture solution"""
         
         messagebox.showinfo(f"About {app_info.app_name}", about_text)
     
     def _show_instructions(self) -> None:
-        """Show instructions dialog."""
-        instructions = """
-CaptiOCR Instructions:
-
-1. Select the language for OCR recognition
-
-2. Click the 'Start' button to begin
-
-3. Draw a selection box around the area containing
-   caption text by clicking and dragging
-
-4. Press Enter to confirm the selection and begin
-   capturing
-
-5. The application will automatically capture and
-   process text in the selected area
-
-6. You can move the yellow capture window by
-   clicking and dragging it to follow moving captions
-
-7. Press the STOP button or Ctrl+Q to stop the
-   capture process
-
-8. The processed text will be saved in the
-   captures folder
-
-9. You can access your captured files through
-   File → Open Captures Folder
-        """
-        
-        # Create custom dialog for instructions
+        """Show instructions dialog with formatted content."""
+        # Create custom dialog
         dialog = tk.Toplevel(self.root)
-        dialog.title("Instructions")
+        dialog.title("CaptiOCR \u2014 Instructions")
         dialog.transient(self.root)
         dialog.grab_set()
-        
+
         # Set size and center
-        width, height = 400, 450
+        width, height = 560, 620
         x = (dialog.winfo_screenwidth() - width) // 2
         y = (dialog.winfo_screenheight() - height) // 2
         dialog.geometry(f"{width}x{height}+{x}+{y}")
-        
-        # Add content
-        frame = ttk.Frame(dialog, padding="20")
+        dialog.minsize(480, 500)
+
+        # Main frame
+        frame = ttk.Frame(dialog, padding="16")
         frame.pack(fill=tk.BOTH, expand=True)
-        
+
         text_widget = tk.Text(
             frame,
             wrap=tk.WORD,
-            width=40,
-            height=20,
-            font=("Arial", 11)
+            width=60,
+            height=30,
+            font=("Segoe UI", 10),
+            padx=12,
+            pady=8,
+            spacing1=2,
+            spacing3=2,
+            borderwidth=0,
+            highlightthickness=0,
         )
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
+
         scrollbar = ttk.Scrollbar(frame, command=text_widget.yview)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         text_widget.config(yscrollcommand=scrollbar.set)
-        
-        text_widget.insert(tk.END, instructions.strip())
+
+        # Configure text tags for formatting
+        text_widget.tag_configure("heading", font=("Segoe UI", 13, "bold"), spacing1=10, spacing3=4)
+        text_widget.tag_configure("section", font=("Segoe UI", 11, "bold"), spacing1=12, spacing3=2)
+        text_widget.tag_configure("body", font=("Segoe UI", 10), spacing1=1, spacing3=1)
+        text_widget.tag_configure("shortcut", font=("Consolas", 10), foreground="#0066CC")
+        text_widget.tag_configure("tip", font=("Segoe UI", 10, "italic"), foreground="#666666")
+
+        # Insert formatted content
+        text_widget.insert(tk.END, "CaptiOCR Instructions\n", "heading")
+
+        text_widget.insert(tk.END, "\nGetting Started\n", "section")
+        text_widget.insert(tk.END, (
+            "1.  Select the OCR language from the dropdown menu.\n"
+            "2.  Click 'Start' to begin a capture session.\n"
+            "3.  Draw a selection rectangle around the caption area\n"
+            "     by clicking and dragging on screen.\n"
+            "4.  Press Enter to confirm. OCR capture starts immediately.\n"
+        ), "body")
+
+        text_widget.insert(tk.END, "\nDuring Capture\n", "section")
+        text_widget.insert(tk.END, (
+            "5.  The yellow capture window shows the active area.\n"
+            "     You can drag it to follow moving captions.\n"
+            "6.  Text is captured every 3\u20134 seconds (configurable).\n"
+            "7.  A raw capture file is saved automatically in the\n"
+            "     captures/ folder with full OCR content.\n"
+        ), "body")
+
+        text_widget.insert(tk.END, "\nStopping & Post-Processing\n", "section")
+        text_widget.insert(tk.END, (
+            "8.  Press the Stop button or Ctrl+Q to end capture.\n"
+            "9.  After stopping, a processed file is generated with\n"
+            "     deduplication, speaker labels, and cleaned text.\n"
+            "10. Open your files via File \u2192 Open Captures Folder.\n"
+        ), "body")
+
+        text_widget.insert(tk.END, "\nKeyboard Shortcuts\n", "section")
+        text_widget.insert(tk.END, "  Ctrl+Q", "shortcut")
+        text_widget.insert(tk.END, "      Stop capture\n", "body")
+        text_widget.insert(tk.END, "  Enter", "shortcut")
+        text_widget.insert(tk.END, "        Confirm selection area\n", "body")
+        text_widget.insert(tk.END, "  Escape", "shortcut")
+        text_widget.insert(tk.END, "       Cancel selection\n", "body")
+
+        text_widget.insert(tk.END, "\nSettings\n", "section")
+        text_widget.insert(tk.END, (
+            "  \u2022  Settings \u2192 Configure Capture Interval\n"
+            "     Adjust min/max polling interval (default: 3\u20134s).\n"
+            "  \u2022  Settings \u2192 Configure Sensitivity\n"
+            "     Tune similarity threshold and delta parameters.\n"
+            "  \u2022  Settings \u2192 Configure Post-Processing\n"
+            "     Adjust dedup thresholds for the processed file.\n"
+        ), "body")
+
+        text_widget.insert(tk.END, "\nTips\n", "section")
+        text_widget.insert(tk.END, (
+            "  \u2022  Place the selection box tightly around the subtitle\n"
+            "     area for best OCR accuracy.\n"
+            "  \u2022  Use Caption Mode (enabled by default) for subtitle-\n"
+            "     optimized OCR settings.\n"
+            "  \u2022  The raw file is a faithful OCR log \u2014 it is never\n"
+            "     modified after capture. Post-processing creates a\n"
+            "     separate clean file that can always be regenerated.\n"
+        ), "tip")
+
         text_widget.config(state=tk.DISABLED)
-        
+
         ttk.Button(
             dialog,
-            text="OK",
+            text="Close",
             command=dialog.destroy
-        ).pack(pady=10)
+        ).pack(pady=(4, 12))
     
     def on_closing(self) -> None:
         """Handle window closing."""

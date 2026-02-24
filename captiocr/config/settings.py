@@ -23,7 +23,7 @@ class Settings:
         # Default settings
         self.language = "English"
         self.debug_enabled = False
-        self.text_similarity_threshold = 0.8
+        self.text_similarity_threshold = 0.85  # Recall-first default
         self.use_caption_mode = True  # Caption Mode is default
         self.custom_tessdata_path = ""
         
