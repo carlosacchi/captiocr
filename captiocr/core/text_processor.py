@@ -435,6 +435,10 @@ class TextProcessor:
         if len(word) < 4:
             return False
 
+        # All-uppercase short words are almost always acronyms, not gibberish
+        if word.isupper() and len(word) <= 6:
+            return False
+
         letters_only = ''.join(c for c in word if c.isalpha())
         if not letters_only:
             return False
@@ -504,14 +508,6 @@ class TextProcessor:
         for word in words:
             # Strip punctuation for checking but keep original if valid
             stripped = word.strip('.,!?;:()[]{}')
-            # Remove isolated uppercase 2-3 letter OCR noise using repetition-based detection
-            # Protect common valid words: I, OK, IT, IS, OR, AN, AM, AT, IF, OF, ON, US, NO
-            if stripped and 2 <= len(stripped) <= 3 and stripped.isupper():
-                letters = stripped.lower()
-                has_vowel = any(c in 'aeiou' for c in letters)
-                is_repeated = len(set(letters)) == 1
-                if is_repeated or not has_vowel:
-                    continue
             if self._is_gibberish_token(stripped):
                 continue
             cleaned_words.append(word)
@@ -519,9 +515,6 @@ class TextProcessor:
 
         # Remove stray percent signs not next to numbers
         text = re.sub(r'(?<!\d)\s*%\s*(?!\d)', ' ', text)
-
-        # Remove isolated single characters that aren't common words (I, a, A)
-        text = re.sub(r'(?<!\w)(?![IaA])[a-zA-Z](?!\w)', '', text)
 
         # Normalize whitespace
         text = re.sub(r'\s+', ' ', text).strip()

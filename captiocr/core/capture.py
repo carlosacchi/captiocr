@@ -252,35 +252,36 @@ class ScreenCapture:
                     self.logger.debug(f"Raw OCR result (length: {len(raw_text)}): '{raw_text[:100]}...'")
                     metrics['total_ocr_frames'] += 1
 
-                    # Clean text (control chars/whitespace only — no semantic filtering)
-                    cleaned_text = self.text_processor.clean_text_raw(raw_text)
+                    # Dual-path: raw for file output, normalized for comparison
+                    raw_cleaned = self.text_processor.clean_text_raw(raw_text)
+                    normalized = self.text_processor.clean_text(raw_text)
 
-                    if not cleaned_text or not cleaned_text.strip():
+                    if not raw_cleaned or not raw_cleaned.strip():
                         metrics['dropped_empty'] += 1
                         continue
 
                     # Skip UI overlay artifacts (Press ESC, Click and drag, etc.)
-                    if self.text_processor._is_ui_artifact(cleaned_text):
+                    if self.text_processor._is_ui_artifact(raw_cleaned):
                         self.logger.debug("Skipped UI artifact frame")
                         metrics['dropped_ui_artifact'] += 1
                         continue
 
-                    # Write full text if meaningfully different from last capture
-                    if self.text_processor.has_significant_new_content(cleaned_text, last_text):
+                    # Write full raw text if normalized version is meaningfully different
+                    if self.text_processor.has_significant_new_content(normalized, last_text):
                         with open(self.output_file_path, 'a', encoding='utf-8') as f:
                             timestamp = datetime.now().strftime('%H:%M:%S')
-                            f.write(f"[{timestamp}] {cleaned_text}\n")
+                            f.write(f"[{timestamp}] {raw_cleaned}\n")
 
-                        last_text = cleaned_text
-                        self.text_history.append(cleaned_text)
+                        last_text = normalized
+                        self.text_history.append(raw_cleaned)
                         similar_captures_count = 0
                         capture_interval = self.capture_config.reset_interval()
                         metrics['written_frames'] += 1
 
                         if self.on_text_captured:
-                            self.on_text_captured(cleaned_text)
+                            self.on_text_captured(raw_cleaned)
 
-                        self.logger.debug(f"Captured: {cleaned_text[:80]}...")
+                        self.logger.debug(f"Captured: {raw_cleaned[:80]}...")
                     else:
                         # No significant change — slow down polling if screen is static
                         similar_captures_count += 1
