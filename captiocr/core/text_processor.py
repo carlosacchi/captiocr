@@ -913,6 +913,60 @@ class TextProcessor:
             prev_emitted_text = consensus
             stats['chunks_emitted'] += 1
 
+        # End-of-stream flush: emit trailing frames that never reached consensus
+        if len(frame_buffer) >= 2:
+            flush_text = max(frame_buffer, key=len)
+            flush_ts = ts_buffer[-1]
+            emit_flush = True
+
+            # Apply steps 4-7 to the flush candidate
+            if prev_emitted_text:
+                # Step 4: No-downgrade rule
+                length_ratio = len(flush_text) / max(len(prev_emitted_text), 1)
+                if length_ratio < min_length_ratio:
+                    prev_words = set(prev_emitted_text.lower().split())
+                    new_words_set = set(flush_text.lower().split()) - prev_words
+                    if len(new_words_set) < min_new_words:
+                        emit_flush = False
+
+                # Step 5: Hysteresis dedup
+                if emit_flush:
+                    similarity = self.calculate_similarity(flush_text, prev_emitted_text)
+                    if similarity >= dedup_enter or (in_dedup_mode and similarity > dedup_exit):
+                        emit_flush = False
+
+                # Step 6: Prefix/suffix overlap dedup
+                if emit_flush:
+                    prefix_end, suffix_start = self._find_overlap_boundary(prev_emitted_text, flush_text)
+                    original_words = flush_text.split()
+                    novel_words = original_words[prefix_end:suffix_start]
+                    if novel_words:
+                        flush_text = ' '.join(novel_words)
+                        if prefix_end > 0 or suffix_start < len(original_words):
+                            stats['merges_performed'] += 1
+                    else:
+                        emit_flush = False
+
+            # Step 7: Sentence splitting
+            if emit_flush:
+                sentences = self._split_into_sentences(flush_text, min_sentence_words)
+                if not sentences:
+                    if len(flush_text.split()) >= min_sentence_words:
+                        sentences = [flush_text]
+                    else:
+                        emit_flush = False
+
+            if emit_flush:
+                combined = '. '.join(sentences)
+                if combined and not combined.endswith(('.', '!', '?')):
+                    combined += '.'
+                result_blocks.append((flush_ts, combined))
+                stats['chunks_emitted'] += 1
+                self.logger.debug(
+                    f"End-of-stream flush: emitted trailing frame at {flush_ts} "
+                    f"({len(frame_buffer)} frames in buffer)"
+                )
+
         # Detect possible drops: gaps > 30s with dissimilar content
         for i in range(1, len(result_blocks)):
             prev_ts = result_blocks[i - 1][0]
