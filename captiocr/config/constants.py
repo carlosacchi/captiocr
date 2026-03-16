@@ -100,3 +100,7 @@ MONITOR_DISCONNECTION_CHECK_INTERVAL = 5.0  # seconds
 
 # Language Download Configuration
 TESSDATA_DOWNLOAD_URL = "https://github.com/tesseract-ocr/tessdata/raw/main/{}.traineddata"
+
+# Update Check Configuration
+GITHUB_RELEASES_API = "https://api.github.com/repos/CarloSacchi/CaptiOCR/releases/latest"
+GITHUB_RELEASES_URL = "https://github.com/CarloSacchi/CaptiOCR/releases/latest"

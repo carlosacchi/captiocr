@@ -4,6 +4,8 @@ Main application window.
 import tkinter as tk
 from tkinter import ttk, messagebox, simpledialog
 import re
+import threading
+import webbrowser
 from datetime import datetime
 from typing import Optional
 import keyboard
@@ -17,7 +19,8 @@ from ..core.text_processor import TextProcessor
 from ..config.settings import Settings
 from ..config.constants import (
     APP_NAME, APP_VERSION, MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT,
-    MAIN_WINDOW_ALPHA, SUPPORTED_LANGUAGES, MONITOR_REFRESH_ON_START
+    MAIN_WINDOW_ALPHA, SUPPORTED_LANGUAGES, MONITOR_REFRESH_ON_START,
+    GITHUB_RELEASES_URL
 )
 from ..utils.file_manager import FileManager
 from ..utils.language_manager import LanguageManager
@@ -58,7 +61,48 @@ class MainWindow:
             self.logger.info("Registered global Ctrl+Q via keyboard.add_hotkey")
         except Exception as e:
             self.logger.error(f"Could not register global hotkey: {e}")
-    
+
+        # Schedule automatic update check after UI has rendered
+        self.root.after(3000, self._check_for_updates_startup)
+
+    def _check_for_updates_startup(self) -> None:
+        """Run update check in background thread on startup (silent on failure)."""
+        def _check():
+            from ..utils.update_checker import check_for_update
+            result = check_for_update(APP_VERSION)
+            if result:
+                self.root.after(0, lambda: self._show_update_popup(*result))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _check_for_updates_manual(self) -> None:
+        """Run update check from Help menu (shows feedback to user)."""
+        def _check():
+            from ..utils.update_checker import check_for_update
+            result = check_for_update(APP_VERSION)
+            if result:
+                self.root.after(0, lambda: self._show_update_popup(*result))
+            else:
+                self.root.after(0, lambda: messagebox.showinfo(
+                    "Check for Updates",
+                    f"You are running the latest version ({APP_VERSION}).\n\n"
+                    "If you have no internet connection, please try again later."
+                ))
+
+        threading.Thread(target=_check, daemon=True).start()
+
+    def _show_update_popup(self, latest_version: str, release_url: str) -> None:
+        """Show update available popup with download link."""
+        answer = messagebox.askyesno(
+            "Update Available",
+            f"A new version of CaptiOCR is available!\n\n"
+            f"Current version: {APP_VERSION}\n"
+            f"Latest version: {latest_version}\n\n"
+            "Would you like to open the download page?"
+        )
+        if answer:
+            webbrowser.open(release_url or GITHUB_RELEASES_URL)
+
     def _on_ctrl_q_toggle(self, event=None):
         """Toggle capture: if idle, start selection→capture; if capturing, stop."""
         if not self.is_capturing:
@@ -189,6 +233,8 @@ class MainWindow:
         # Help menu
         help_menu = tk.Menu(menubar, tearoff=0)
         menubar.add_cascade(label="Help", menu=help_menu)
+        help_menu.add_command(label="Check for Updates...", command=self._check_for_updates_manual)
+        help_menu.add_separator()
         help_menu.add_command(label="About", command=self._show_about)
         help_menu.add_command(label="Instructions", command=self._show_instructions)
     
