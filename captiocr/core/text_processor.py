@@ -2,20 +2,23 @@
 Text processing and analysis utilities.
 """
 import re
+import math
 import difflib
 from typing import List, Optional, Tuple
-from collections import deque
+from collections import deque, Counter
 import logging
 
 from ..config.constants import (
     TEXT_SIMILARITY_THRESHOLD,
     MIN_TEXT_LENGTH,
+    POST_PROCESS_EMIT_SCORE_THRESHOLD,
+    POST_PROCESS_FREQ_WINDOW_SIZE,
+    POST_PROCESS_FRAME_CONSENSUS_WINDOW,
+    POST_PROCESS_MIN_SENTENCE_WORDS,
     POST_PROCESS_DEDUP_ENTER_THRESHOLD,
     POST_PROCESS_DEDUP_EXIT_THRESHOLD,
     POST_PROCESS_MIN_LENGTH_RATIO,
     POST_PROCESS_MIN_NEW_WORDS,
-    POST_PROCESS_FRAME_CONSENSUS_WINDOW,
-    POST_PROCESS_MIN_SENTENCE_WORDS
 )
 
 
@@ -478,9 +481,9 @@ class TextProcessor:
             return True
         if has_mixed_case and vowel_ratio < 0.3:
             return True
-        if len(letters_only) >= 5 and vowel_ratio < 0.15:
+        if len(letters_only) >= 5 and vowel_ratio < 0.10:
             return True
-        if max_consonant_run >= 4 and vowel_ratio < 0.25:
+        if max_consonant_run >= 6 and vowel_ratio < 0.20:
             return True
 
         return False
@@ -525,10 +528,12 @@ class TextProcessor:
     # The @ pattern is the primary speaker delimiter in Teams/Zoom/Meet captions.
     # The comma pattern requires a parenthetical qualifier to avoid false positives
     # like "Yeah, Marcos" being matched as a speaker label.
+    # Qualifier length is capped to prevent OCR-mangled frames (where a closing paren
+    # is missed) from greedily swallowing a sentence into the speaker name.
     _SPEAKER_LABEL_RE = re.compile(
         r'[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*\s*@\s*'              # FirstName LastName @
         r'|'
-        r'[A-Z][a-zA-Z]{2,}(?:,\s*[A-Z][a-zA-Z]{2,})+(?:\s+\([^)]*\))\s*'  # LastName, FirstName (qualifier) — required
+        r'[A-Z][a-zA-Z]{2,}(?:,\s*[A-Z][a-zA-Z]{2,})+(?:\s+\([^)]{1,30}\))\s*'  # LastName, FirstName (qualifier ≤30 chars)
     )
 
     def _split_into_sentences(self, text: str,
@@ -613,10 +618,12 @@ class TextProcessor:
         Returns:
             Dict mapping variant strings to their correct full speaker labels.
         """
-        # Find all full speaker labels (those with qualifiers like "(external)")
+        # Find all full speaker labels (those with qualifiers like "(external)").
+        # Qualifier length is capped (≤30 chars) to prevent OCR-mangled frames
+        # where a closing paren is missed from being captured as a giant "name".
         full_names = set()
         qualified_pattern = re.compile(
-            r'([A-Z][a-zA-Z]{2,}(?:,\s*[A-Z][a-zA-Z]{2,})+(?:\s+\([^)]*\)))'
+            r'([A-Z][a-zA-Z]{2,}(?:,\s*[A-Z][a-zA-Z]{2,})+(?:\s+\([^)]{1,30}\)))'
         )
         at_pattern = re.compile(
             r'([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s*@'
@@ -624,9 +631,15 @@ class TextProcessor:
 
         for _, text in text_blocks:
             for match in qualified_pattern.finditer(text):
-                full_names.add(match.group(1).strip())
+                candidate = match.group(1).strip()
+                # Defensive: reject names with sentence punctuation or excessive length —
+                # those indicate the regex matched across a malformed paren in OCR noise.
+                if len(candidate) <= 60 and not any(c in candidate for c in '.!?'):
+                    full_names.add(candidate)
             for match in at_pattern.finditer(text):
-                full_names.add(match.group(1).strip())
+                candidate = match.group(1).strip()
+                if len(candidate) <= 60:
+                    full_names.add(candidate)
 
         if not full_names:
             return {}
@@ -687,36 +700,48 @@ class TextProcessor:
 
         return text
 
-    def _find_overlap_boundary(self, prev_text: str, new_text: str) -> Tuple[int, int]:
+    def _find_novel_words(self, prev_text: str, new_text: str) -> List[str]:
         """
-        Find the shared prefix and suffix boundaries between two texts at word level.
+        Extract words from new_text that follow the rolling-window overlap with prev_text.
+
+        Captions accumulate: a new frame typically shares its prefix with the tail of
+        the previous frame (the rolling window) and adds new content at the end.
+        We identify the boundary by finding a match block whose END anchors at (or
+        very near) the END of prev_text — that is the true continuation point.
+
+        Falling back to "the last match anywhere" caused content loss when a speaker
+        label like "Jerin Sam @" appeared multiple times within a single frame: the
+        last occurrence anchored mid-sentence and dropped everything before it.
 
         Returns:
-            Tuple of (prefix_end_idx, suffix_start_idx) as word indices into new_text.
-            The novel content is new_words[prefix_end_idx:suffix_start_idx].
+            List of words in new_text that come after the rolling-window overlap.
         """
-        prev_words = prev_text.lower().split()
-        new_words = new_text.lower().split()
+        prev_words = prev_text.split()
+        new_words = new_text.split()
+        if not prev_words:
+            return new_words
+        if not new_words:
+            return []
 
-        # Find shared prefix length
-        prefix_len = 0
-        for i in range(min(len(prev_words), len(new_words))):
-            if prev_words[i] == new_words[i]:
-                prefix_len = i + 1
-            else:
-                break
+        sm = difflib.SequenceMatcher(None, prev_words, new_words, autojunk=False)
+        # Tail-anchored boundary: prefer a 3+ word match whose end is at (or near)
+        # the end of prev — that is the rolling-window continuation point.
+        # "Near" = within the last 3 words of prev, to tolerate trailing OCR noise.
+        prev_tail_threshold = max(len(prev_words) - 3, 0)
+        anchor_end = 0
+        for i, j, n in sm.get_matching_blocks():
+            if n >= 3 and (i + n) >= prev_tail_threshold:
+                anchor_end = max(anchor_end, j + n)
+        return new_words[anchor_end:]
 
-        # Find shared suffix length (avoid overlapping with prefix)
-        suffix_len = 0
-        max_suffix = min(len(prev_words), len(new_words)) - prefix_len
-        for i in range(1, max_suffix + 1):
-            if prev_words[-i] == new_words[-i]:
-                suffix_len = i
-            else:
-                break
+    def _idf_score(self, word: str, session_freq: Counter, window_frames: int) -> float:
+        """
+        IDF-like novelty score for a word given its frequency in the recent session window.
 
-        suffix_start = len(new_words) - suffix_len if suffix_len > 0 else len(new_words)
-        return prefix_len, suffix_start
+        Rare words (low frequency) score higher. Score is always >= 1.0.
+        """
+        freq = session_freq.get(word, 0)
+        return math.log(max(window_frames, 2) / (1.0 + freq)) + 1.0
 
     def _frame_consensus(self, frames: List[str], min_agreement: int = 2) -> Optional[str]:
         """
@@ -762,34 +787,32 @@ class TextProcessor:
         return {w for w in words if len(w) > 2 or w in {'a', 'i', 'is', 'or', 'in', 'to', 'at', 'it', 'if', 'of', 'on'}}
 
     def filter_duplicate_blocks_aggressive(self, text_blocks: List[Tuple[str, str]],
+                                            emit_score_threshold: float = POST_PROCESS_EMIT_SCORE_THRESHOLD,
+                                            freq_window_size: int = POST_PROCESS_FREQ_WINDOW_SIZE,
+                                            frame_window: int = POST_PROCESS_FRAME_CONSENSUS_WINDOW,
+                                            min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS,
                                             dedup_enter: float = POST_PROCESS_DEDUP_ENTER_THRESHOLD,
                                             dedup_exit: float = POST_PROCESS_DEDUP_EXIT_THRESHOLD,
                                             min_length_ratio: float = POST_PROCESS_MIN_LENGTH_RATIO,
                                             min_new_words: int = POST_PROCESS_MIN_NEW_WORDS,
-                                            frame_window: int = POST_PROCESS_FRAME_CONSENSUS_WINDOW,
-                                            min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS
                                             ) -> List[Tuple[str, str]]:
         """
-        Recall-first post-processing pipeline for raw capture files.
+        ROVER + TF-IDF post-processing pipeline for raw capture files.
 
         Processes raw OCR frames through a multi-stage pipeline:
         1. UI artifact filter — remove CaptiOCR overlay text
         2. OCR artifact cleaning — pipe normalization, gibberish removal
-        3. Frame consensus — emit only when content is stable across frames
-        4. No-downgrade rule — skip transient short frames
-        5. Hysteresis dedup — suppress repetition with enter/exit thresholds
-        6. Prefix/suffix overlap dedup — emit only the novel portion
-        7. Sentence splitting — structure the output
+        3. Novel word extraction — difflib SequenceMatcher at word level
+        4. ROVER + TF-IDF scoring — weight novel tokens by rarity and temporal stability
+        5. Sentence splitting — structure the output
 
         Args:
             text_blocks: List of (timestamp, text) tuples from raw capture
-            dedup_enter: Similarity threshold to enter dedup mode
-            dedup_exit: Similarity threshold to exit dedup mode
-            min_length_ratio: No-downgrade rule: min ratio of new vs previous length
-            min_new_words: No-downgrade rule: min new words to accept a shorter frame
-            frame_window: Number of consecutive frames for consensus check
-            global_window: Number of recent sentences to track
+            emit_score_threshold: Min aggregate novelty score to emit a frame
+            freq_window_size: Sliding window size (frames) for IDF frequency tracking
+            frame_window: Frame voting window for ROVER temporal confirmation
             min_sentence_words: Minimum words for a sentence to be kept
+            dedup_enter/dedup_exit/min_length_ratio/min_new_words: Legacy params, accepted but unused
 
         Returns:
             List of (timestamp, text) tuples with deduplication applied
@@ -801,20 +824,21 @@ class TextProcessor:
         speaker_repair_map = self._build_speaker_name_cache(text_blocks)
 
         result_blocks = []
-        frame_buffer = deque(maxlen=frame_window)
-        ts_buffer = deque(maxlen=frame_window)
+        frame_buffer: deque = deque(maxlen=frame_window)
+        ts_buffer: deque = deque(maxlen=frame_window)
         prev_emitted_text = ""
-        in_dedup_mode = False
+
+        # Sliding frequency window for IDF scoring
+        freq_window: deque = deque()
+        session_freq: Counter = Counter()
 
         stats = {
             'speaker_names_repaired': 0,
             'total_frames': len(text_blocks),
             'dropped_ui_artifact': 0,
             'dropped_ocr_artifact': 0,
-            'dropped_no_consensus': 0,
-            'dropped_no_downgrade': 0,
-            'dropped_hysteresis_dedup': 0,
             'dropped_empty_novel': 0,
+            'dropped_low_score': 0,
             'merges_performed': 0,
             'chunks_emitted': 0,
             'possible_drops_detected': 0,
@@ -851,52 +875,70 @@ class TextProcessor:
                     stats['speaker_names_repaired'] += 1
                     cleaned = repaired
 
-            # Step 3: Frame consensus
+            # Update frame buffer and sliding frequency window
             frame_buffer.append(cleaned)
             ts_buffer.append(timestamp)
-            consensus = self._frame_consensus(list(frame_buffer))
-            if consensus is None:
-                stats['dropped_no_consensus'] += 1
+            frame_counter = Counter(cleaned.lower().split())
+            freq_window.append(frame_counter)
+            for word, cnt in frame_counter.items():
+                session_freq[word] += cnt
+            if len(freq_window) > freq_window_size:
+                evicted = freq_window.popleft()
+                for word, cnt in evicted.items():
+                    session_freq[word] -= cnt
+                    if session_freq[word] <= 0:
+                        del session_freq[word]
+
+            # Step 3: Extract novel words
+            # suffix_words: coherent suffix for output (difflib, ≥3-word match threshold)
+            # score_words: all new words vs prev for scoring (catches mid-sentence changes)
+            if prev_emitted_text:
+                suffix_words = self._find_novel_words(prev_emitted_text, cleaned)
+                prev_word_set = set(prev_emitted_text.lower().split())
+                score_words = [w for w in cleaned.split() if w.lower() not in prev_word_set]
+            else:
+                suffix_words = cleaned.split()
+                score_words = suffix_words
+
+            if not suffix_words and not score_words:
+                stats['dropped_empty_novel'] += 1
                 continue
 
-            # Step 4: No-downgrade rule
-            if prev_emitted_text:
-                length_ratio = len(consensus) / max(len(prev_emitted_text), 1)
-                if length_ratio < min_length_ratio:
-                    prev_words = set(prev_emitted_text.lower().split())
-                    new_words_set = set(consensus.lower().split()) - prev_words
-                    if len(new_words_set) < min_new_words:
-                        stats['dropped_no_downgrade'] += 1
-                        continue
+            # Step 4: ROVER + TF-IDF scoring over all new words (full coverage)
+            # Score scales up linearly during warm-up (first freq_window_size frames)
+            warmup_factor = min(len(freq_window) / max(freq_window_size, 1), 1.0)
+            effective_threshold = emit_score_threshold * warmup_factor
+            window_frames = max(len(freq_window), 1)
+            buffer_size = max(len(frame_buffer), 1)
+            novel_score = 0.0
 
-            # Step 5: Hysteresis dedup
-            if prev_emitted_text:
-                similarity = self.calculate_similarity(consensus, prev_emitted_text)
-                if not in_dedup_mode and similarity >= dedup_enter:
-                    in_dedup_mode = True
-                    stats['dropped_hysteresis_dedup'] += 1
-                    continue
-                elif in_dedup_mode and similarity > dedup_exit:
-                    stats['dropped_hysteresis_dedup'] += 1
-                    continue
-                elif in_dedup_mode and similarity <= dedup_exit:
-                    in_dedup_mode = False
+            for word in score_words:
+                word_lower = word.lower()
+                # ROVER: fraction of recent frames that contain this word
+                frame_presence = sum(
+                    1 for f in frame_buffer if word_lower in f.lower().split()
+                ) / buffer_size
+                # IDF: higher score for words rare in the recent session window
+                idf = self._idf_score(word_lower, session_freq, window_frames)
+                novel_score += idf * frame_presence
 
-            # Step 6: Prefix/suffix overlap dedup
-            novel_text = consensus
-            if prev_emitted_text:
-                prefix_end, suffix_start = self._find_overlap_boundary(prev_emitted_text, consensus)
-                original_words = consensus.split()
-                novel_words = original_words[prefix_end:suffix_start]
-                if novel_words:
-                    novel_text = ' '.join(novel_words)
-                    if prefix_end > 0 or suffix_start < len(original_words):
-                        stats['merges_performed'] += 1
-                else:
-                    stats['dropped_empty_novel'] += 1
-                    continue
+            if novel_score < effective_threshold:
+                stats['dropped_low_score'] += 1
+                continue
 
-            # Step 7: Sentence splitting
+            # Step 5: Build output text
+            # Use suffix for rolling-window extensions; fall back to full frame
+            # when mid-sentence changes are detected (e.g. negation inserted in middle)
+            if suffix_words:
+                novel_text = ' '.join(suffix_words)
+                if prev_emitted_text and suffix_words != cleaned.split():
+                    stats['merges_performed'] += 1
+            else:
+                # Mid-sentence change: no clean suffix, emit full frame
+                novel_text = cleaned
+                stats['merges_performed'] += 1
+
+            # Step 6: Sentence splitting
             sentences = self._split_into_sentences(novel_text, min_sentence_words)
             if not sentences:
                 if len(novel_text.split()) >= min_sentence_words:
@@ -905,67 +947,32 @@ class TextProcessor:
                     stats['dropped_empty_novel'] += 1
                     continue
 
-            # Step 8: Emit
+            # Step 7: Emit
             combined = '. '.join(sentences)
             if combined and not combined.endswith(('.', '!', '?')):
                 combined += '.'
             result_blocks.append((timestamp, combined))
-            prev_emitted_text = consensus
+            prev_emitted_text = cleaned
             stats['chunks_emitted'] += 1
 
-        # End-of-stream flush: emit trailing frames that never reached consensus
-        if len(frame_buffer) >= 2:
-            flush_text = max(frame_buffer, key=len)
+        # End-of-stream flush: emit trailing novel content from the most recent frame
+        if frame_buffer and prev_emitted_text:
+            flush_text = frame_buffer[-1]
             flush_ts = ts_buffer[-1]
-            emit_flush = True
-
-            # Apply steps 4-7 to the flush candidate
-            if prev_emitted_text:
-                # Step 4: No-downgrade rule
-                length_ratio = len(flush_text) / max(len(prev_emitted_text), 1)
-                if length_ratio < min_length_ratio:
-                    prev_words = set(prev_emitted_text.lower().split())
-                    new_words_set = set(flush_text.lower().split()) - prev_words
-                    if len(new_words_set) < min_new_words:
-                        emit_flush = False
-
-                # Step 5: Hysteresis dedup
-                if emit_flush:
-                    similarity = self.calculate_similarity(flush_text, prev_emitted_text)
-                    if similarity >= dedup_enter or (in_dedup_mode and similarity > dedup_exit):
-                        emit_flush = False
-
-                # Step 6: Prefix/suffix overlap dedup
-                if emit_flush:
-                    prefix_end, suffix_start = self._find_overlap_boundary(prev_emitted_text, flush_text)
-                    original_words = flush_text.split()
-                    novel_words = original_words[prefix_end:suffix_start]
-                    if novel_words:
-                        flush_text = ' '.join(novel_words)
-                        if prefix_end > 0 or suffix_start < len(original_words):
-                            stats['merges_performed'] += 1
-                    else:
-                        emit_flush = False
-
-            # Step 7: Sentence splitting
-            if emit_flush:
-                sentences = self._split_into_sentences(flush_text, min_sentence_words)
-                if not sentences:
-                    if len(flush_text.split()) >= min_sentence_words:
-                        sentences = [flush_text]
-                    else:
-                        emit_flush = False
-
-            if emit_flush:
-                combined = '. '.join(sentences)
-                if combined and not combined.endswith(('.', '!', '?')):
-                    combined += '.'
-                result_blocks.append((flush_ts, combined))
-                stats['chunks_emitted'] += 1
-                self.logger.debug(
-                    f"End-of-stream flush: emitted trailing frame at {flush_ts} "
-                    f"({len(frame_buffer)} frames in buffer)"
-                )
+            flush_novel = self._find_novel_words(prev_emitted_text, flush_text)
+            if flush_novel:
+                sentences = self._split_into_sentences(' '.join(flush_novel), min_sentence_words)
+                if not sentences and len(flush_novel) >= min_sentence_words:
+                    sentences = [' '.join(flush_novel)]
+                if sentences:
+                    combined = '. '.join(sentences)
+                    if not combined.endswith(('.', '!', '?')):
+                        combined += '.'
+                    result_blocks.append((flush_ts, combined))
+                    stats['chunks_emitted'] += 1
+                    self.logger.debug(
+                        f"End-of-stream flush: emitted trailing frame at {flush_ts}"
+                    )
 
         # Detect possible drops: gaps > 30s with dissimilar content
         for i in range(1, len(result_blocks)):
@@ -987,8 +994,7 @@ class TextProcessor:
         self.logger.info(
             f"Post-process: {stats['total_frames']} frames -> {stats['chunks_emitted']} chunks. "
             f"Dropped: {stats['dropped_ui_artifact']} UI, {stats['dropped_ocr_artifact']} OCR, "
-            f"{stats['dropped_no_consensus']} no-consensus, {stats['dropped_no_downgrade']} no-downgrade, "
-            f"{stats['dropped_hysteresis_dedup']} hysteresis, {stats['dropped_empty_novel']} empty-novel. "
+            f"{stats['dropped_empty_novel']} no-novel, {stats['dropped_low_score']} low-score. "
             f"Merges: {stats['merges_performed']}. Speaker repairs: {stats['speaker_names_repaired']}. "
             f"Possible drops: {stats['possible_drops_detected']}."
         )

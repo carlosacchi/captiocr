@@ -3,7 +3,6 @@ Dialog windows for various settings and configurations.
 """
 import tkinter as tk
 from tkinter import ttk, messagebox
-from typing import Optional
 
 from .base_window import BaseWindow
 from .dialog_base import DialogBase
@@ -205,7 +204,8 @@ class LanguageDownloadDialog(BaseWindow):
 
             except Exception as e:
                 # Schedule error handling on main thread
-                _safe_after(lambda: self._on_download_error(str(e), lang_code))
+                err_msg = str(e)
+                _safe_after(lambda: self._on_download_error(err_msg, lang_code))
 
         # Start download in background thread
         thread = threading.Thread(target=download_thread, daemon=True)
@@ -367,83 +367,67 @@ class PostProcessConfigDialog(DialogBase):
             font=("Arial", 9), foreground="gray"
         ).pack(pady=(0, 15))
 
-        # --- Dedup Enter Threshold ---
+        # --- Emit Score Threshold ---
         row1 = ttk.Frame(frame)
         row1.pack(fill=tk.X, pady=6)
-        ttk.Label(row1, text="Dedup Enter Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.dedup_enter_var = tk.IntVar(
-            value=int(self.capture_config.post_process_dedup_enter * 100))
-        ttk.Spinbox(row1, from_=50, to=95, increment=5,
-                    textvariable=self.dedup_enter_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row1, text="% similarity to suppress", font=("Arial", 8),
+        ttk.Label(row1, text="Emit Score Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.emit_score_var = tk.IntVar(
+            value=int(self.capture_config.post_process_emit_score_threshold * 10))
+        ttk.Spinbox(row1, from_=5, to=50, increment=5,
+                    textvariable=self.emit_score_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row1, text="× 0.1 (e.g. 20 = 2.0)", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Similarity above this starts suppressing duplicate frames",
+            text="   Minimum novelty score to emit a frame. Lower = keep more, Higher = stricter.",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
         ).pack(anchor='w', pady=(0, 6))
 
-        # --- Dedup Exit Threshold ---
+        # --- Frequency Window ---
         row2 = ttk.Frame(frame)
         row2.pack(fill=tk.X, pady=6)
-        ttk.Label(row2, text="Dedup Exit Threshold:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.dedup_exit_var = tk.IntVar(
-            value=int(self.capture_config.post_process_dedup_exit * 100))
-        ttk.Spinbox(row2, from_=30, to=80, increment=5,
-                    textvariable=self.dedup_exit_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row2, text="% similarity to resume", font=("Arial", 8),
+        ttk.Label(row2, text="Frequency Window:", width=22, anchor='w').pack(side=tk.LEFT)
+        self.freq_window_var = tk.IntVar(
+            value=self.capture_config.post_process_freq_window_size)
+        ttk.Spinbox(row2, from_=10, to=60, increment=5,
+                    textvariable=self.freq_window_var, width=10).pack(side=tk.LEFT, padx=5)
+        ttk.Label(row2, text="recent frames for IDF", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Similarity below this resumes emitting (must be < enter threshold)",
+            text="   Frames tracked to score word rarity. Longer = slower adaptation.",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
         ).pack(anchor='w', pady=(0, 6))
 
-        # --- Min Length Ratio ---
+        # --- Frame Voting Window ---
         row3 = ttk.Frame(frame)
         row3.pack(fill=tk.X, pady=6)
-        ttk.Label(row3, text="Min Length Ratio:", width=22, anchor='w').pack(side=tk.LEFT)
-        self.length_ratio_var = tk.IntVar(
-            value=int(self.capture_config.post_process_min_length_ratio * 100))
-        ttk.Spinbox(row3, from_=30, to=90, increment=10,
-                    textvariable=self.length_ratio_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row3, text="% of previous length", font=("Arial", 8),
-                  foreground="gray").pack(side=tk.LEFT, padx=5)
-        ttk.Label(
-            frame,
-            text="   No-downgrade: skip frames shorter than this ratio vs previous",
-            font=("Arial", 8), foreground="#555", justify=tk.LEFT
-        ).pack(anchor='w', pady=(0, 6))
-
-        # --- Frame Consensus Window ---
-        row4 = ttk.Frame(frame)
-        row4.pack(fill=tk.X, pady=6)
-        ttk.Label(row4, text="Frame Consensus:", width=22, anchor='w').pack(side=tk.LEFT)
+        ttk.Label(row3, text="Frame Voting Window:", width=22, anchor='w').pack(side=tk.LEFT)
         self.frame_window_var = tk.IntVar(
             value=self.capture_config.post_process_frame_window)
-        ttk.Spinbox(row4, from_=2, to=5, increment=1,
+        ttk.Spinbox(row3, from_=2, to=5, increment=1,
                     textvariable=self.frame_window_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row4, text="consecutive frames", font=("Arial", 8),
+        ttk.Label(row3, text="consecutive frames", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Emit only when content is stable across this many frames",
+            text="   ROVER votes new tokens across this many frames for temporal confirmation.",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
         ).pack(anchor='w', pady=(0, 6))
 
         # --- Min Sentence Words ---
-        row5 = ttk.Frame(frame)
-        row5.pack(fill=tk.X, pady=6)
-        ttk.Label(row5, text="Min Sentence Words:", width=22, anchor='w').pack(side=tk.LEFT)
+        row4 = ttk.Frame(frame)
+        row4.pack(fill=tk.X, pady=6)
+        ttk.Label(row4, text="Min Sentence Words:", width=22, anchor='w').pack(side=tk.LEFT)
         self.min_words_var = tk.IntVar(
             value=self.capture_config.post_process_min_sentence_words)
-        ttk.Spinbox(row5, from_=1, to=5, increment=1,
+        ttk.Spinbox(row4, from_=1, to=5, increment=1,
                     textvariable=self.min_words_var, width=10).pack(side=tk.LEFT, padx=5)
-        ttk.Label(row5, text="words minimum", font=("Arial", 8),
+        ttk.Label(row4, text="words minimum", font=("Arial", 8),
                   foreground="gray").pack(side=tk.LEFT, padx=5)
         ttk.Label(
             frame,
-            text="   Lower = keeps short replies (Sure, Yes). Higher = cleaner output",
+            text="   Lower = keeps short replies (Sure, Yes). Higher = cleaner output.",
             font=("Arial", 8), foreground="#555", justify=tk.LEFT
         ).pack(anchor='w', pady=(0, 6))
 
@@ -467,15 +451,13 @@ class PostProcessConfigDialog(DialogBase):
     def _on_reset(self) -> None:
         """Reset all values to defaults."""
         from ..config.constants import (
-            POST_PROCESS_DEDUP_ENTER_THRESHOLD,
-            POST_PROCESS_DEDUP_EXIT_THRESHOLD,
-            POST_PROCESS_MIN_LENGTH_RATIO,
+            POST_PROCESS_EMIT_SCORE_THRESHOLD,
+            POST_PROCESS_FREQ_WINDOW_SIZE,
             POST_PROCESS_FRAME_CONSENSUS_WINDOW,
             POST_PROCESS_MIN_SENTENCE_WORDS
         )
-        self.dedup_enter_var.set(int(POST_PROCESS_DEDUP_ENTER_THRESHOLD * 100))
-        self.dedup_exit_var.set(int(POST_PROCESS_DEDUP_EXIT_THRESHOLD * 100))
-        self.length_ratio_var.set(int(POST_PROCESS_MIN_LENGTH_RATIO * 100))
+        self.emit_score_var.set(int(POST_PROCESS_EMIT_SCORE_THRESHOLD * 10))
+        self.freq_window_var.set(POST_PROCESS_FREQ_WINDOW_SIZE)
         self.frame_window_var.set(POST_PROCESS_FRAME_CONSENSUS_WINDOW)
         self.min_words_var.set(POST_PROCESS_MIN_SENTENCE_WORDS)
         messagebox.showinfo(
@@ -489,33 +471,23 @@ class PostProcessConfigDialog(DialogBase):
         try:
             self.dialog.update_idletasks()
 
-            new_dedup_enter = float(self.dedup_enter_var.get()) / 100.0
-            new_dedup_exit = float(self.dedup_exit_var.get()) / 100.0
-            new_length_ratio = float(self.length_ratio_var.get()) / 100.0
+            new_emit_score = float(self.emit_score_var.get()) / 10.0
+            new_freq_window = int(self.freq_window_var.get())
             new_frame_window = int(self.frame_window_var.get())
             new_min_words = int(self.min_words_var.get())
 
             # Validate ranges
-            if not (0.50 <= new_dedup_enter <= 0.95):
+            if not (0.5 <= new_emit_score <= 5.0):
                 messagebox.showerror("Invalid Value",
-                                     "Dedup Enter Threshold must be between 50% and 95%.")
+                                     "Emit Score Threshold must be between 0.5 and 5.0.")
                 return
-            if not (0.30 <= new_dedup_exit <= 0.80):
+            if not (10 <= new_freq_window <= 60):
                 messagebox.showerror("Invalid Value",
-                                     "Dedup Exit Threshold must be between 30% and 80%.")
-                return
-            if new_dedup_exit >= new_dedup_enter:
-                messagebox.showerror("Invalid Value",
-                                     "Dedup Exit must be lower than Dedup Enter\n"
-                                     "(hysteresis gap required).")
-                return
-            if not (0.30 <= new_length_ratio <= 0.90):
-                messagebox.showerror("Invalid Value",
-                                     "Min Length Ratio must be between 30% and 90%.")
+                                     "Frequency Window must be between 10 and 60 frames.")
                 return
             if not (2 <= new_frame_window <= 5):
                 messagebox.showerror("Invalid Value",
-                                     "Frame Consensus must be between 2 and 5.")
+                                     "Frame Voting Window must be between 2 and 5.")
                 return
             if not (1 <= new_min_words <= 5):
                 messagebox.showerror("Invalid Value",
@@ -523,9 +495,8 @@ class PostProcessConfigDialog(DialogBase):
                 return
 
             # Apply to config
-            self.capture_config.post_process_dedup_enter = new_dedup_enter
-            self.capture_config.post_process_dedup_exit = new_dedup_exit
-            self.capture_config.post_process_min_length_ratio = new_length_ratio
+            self.capture_config.post_process_emit_score_threshold = new_emit_score
+            self.capture_config.post_process_freq_window_size = new_freq_window
             self.capture_config.post_process_frame_window = new_frame_window
             self.capture_config.post_process_min_sentence_words = new_min_words
 
@@ -544,10 +515,9 @@ class PostProcessConfigDialog(DialogBase):
             messagebox.showinfo(
                 "Settings Updated",
                 f"Post-processing updated:\n"
-                f"Dedup Enter: {int(new_dedup_enter * 100)}%\n"
-                f"Dedup Exit: {int(new_dedup_exit * 100)}%\n"
-                f"Min Length Ratio: {int(new_length_ratio * 100)}%\n"
-                f"Frame Consensus: {new_frame_window}\n"
+                f"Emit Score Threshold: {new_emit_score:.1f}\n"
+                f"Frequency Window: {new_freq_window} frames\n"
+                f"Frame Voting Window: {new_frame_window}\n"
                 f"Min Sentence Words: {new_min_words}\n\n"
                 f"{save_msg}"
             )

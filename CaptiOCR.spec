@@ -59,7 +59,9 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX disabled for public builds: UPX-packed PyInstaller binaries
+    # frequently trigger AV/EDR heuristics and SmartScreen warnings.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

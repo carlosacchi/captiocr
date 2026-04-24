@@ -3,7 +3,6 @@ Capture window overlay for showing capture area.
 """
 import tkinter as tk
 from typing import Optional, Callable, Tuple
-import logging
 
 from .base_window import BaseWindow
 from ..config.constants import (

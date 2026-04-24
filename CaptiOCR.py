@@ -5,6 +5,18 @@ CaptiOCR - Main entry point
 import sys
 import os
 
+# Detach from the console on Windows when running from source.
+# FreeConsole() only succeeds when a console is attached (python.exe); it is a no-op
+# under pythonw.exe (no console). On success, redirect stdout/stderr to devnull so
+# that subsequent print() calls do not raise [WinError 6] on the now-invalid handles.
+if sys.platform == 'win32' and not hasattr(sys, '_MEIPASS'):
+    import ctypes
+    if ctypes.windll.kernel32.FreeConsole():
+        _devnull = open(os.devnull, 'w')
+        sys.stdout = _devnull
+        sys.stderr = _devnull
+
+
 def main():
     """Main entry point for CaptiOCR."""
     try:
@@ -15,15 +27,15 @@ def main():
         else:
             # Running in development
             base_path = os.path.dirname(os.path.abspath(__file__))
-        
+
         # Add base path to sys.path if not already there
         if base_path not in sys.path:
             sys.path.insert(0, base_path)
-        
+
         # Import and run the main application
         from captiocr.main import main as app_main
         app_main()
-        
+
     except Exception as e:
         # Show error dialog
         error_message = f"Failed to start CaptiOCR:\n\n{str(e)}"

@@ -3,8 +3,9 @@ OCR processing module using Tesseract.
 """
 import os
 import sys
+import urllib.parse
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 import logging
 import subprocess
 
@@ -17,8 +18,25 @@ except ImportError as e:
 
 from ..config.constants import (
     TESSERACT_CMD, TESSDATA_PREFIX,
-    OCR_CONFIG_CAPTION_MODE, OCR_CONFIG_GENERAL
+    OCR_CONFIG_CAPTION_MODE, OCR_CONFIG_GENERAL,
+    TESSERACT_INSTALLER_URL, TESSERACT_INSTALLER_TRUSTED_HOSTS,
+    TESSERACT_INSTALLER_MIN_SIZE_BYTES,
 )
+
+
+def _is_trusted_installer_url(url: str) -> bool:
+    """
+    Validate that the Tesseract installer URL points to a trusted upstream
+    host over HTTPS. Defense-in-depth in case the constant is overridden
+    or modified at runtime.
+    """
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except ValueError:
+        return False
+    if parsed.scheme != "https":
+        return False
+    return parsed.hostname in TESSERACT_INSTALLER_TRUSTED_HOSTS
 
 
 class OCRProcessor:
@@ -296,16 +314,41 @@ class OCRProcessor:
             import urllib.request
             import hashlib
             import time
+            from tkinter import messagebox
 
             self.logger.info("Starting Tesseract installation...")
 
-            # Download URL for Tesseract installer
-            installer_url = (
-                "https://github.com/tesseract-ocr/tesseract/releases/download/"
-                "5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
-            )
-            # Minimum expected file size in bytes (installer should be several MB)
-            min_installer_size = 5_000_000
+            # Use the pinned, trusted upstream URL. Reject anything that
+            # has been redirected or tampered with off the trusted hosts.
+            installer_url = TESSERACT_INSTALLER_URL
+            if not _is_trusted_installer_url(installer_url):
+                self.logger.error(
+                    f"Refusing to download installer from untrusted URL: {installer_url}"
+                )
+                return False
+
+            # Require explicit user consent before downloading and
+            # executing a third-party installer.
+            try:
+                consent = messagebox.askyesno(
+                    "Install Tesseract OCR",
+                    (
+                        "CaptiOCR will download and run the official Tesseract "
+                        "OCR installer from:\n\n"
+                        f"{installer_url}\n\n"
+                        "Do you want to continue?"
+                    ),
+                )
+            except Exception as e:
+                # If we cannot show a dialog (e.g. headless), fail closed.
+                self.logger.error(f"Could not prompt for installer consent: {e}")
+                return False
+
+            if not consent:
+                self.logger.info("User declined Tesseract installation")
+                return False
+
+            min_installer_size = TESSERACT_INSTALLER_MIN_SIZE_BYTES
 
             # Convert TESSERACT_CMD string to Path for directory operations
             tesseract_path = Path(TESSERACT_CMD)
@@ -319,6 +362,14 @@ class OCRProcessor:
                 self.logger.info("Downloading Tesseract installer...")
                 try:
                     with urllib.request.urlopen(installer_url, timeout=300) as response:
+                        # Re-check the resolved URL after any redirects to
+                        # ensure we still landed on a trusted host.
+                        final_url = response.geturl()
+                        if not _is_trusted_installer_url(final_url):
+                            self.logger.error(
+                                f"Installer redirected to untrusted URL: {final_url}"
+                            )
+                            return False
                         installer_data = response.read()
                         with open(installer_path, 'wb') as f:
                             f.write(installer_data)
@@ -343,7 +394,7 @@ class OCRProcessor:
 
                 # Run installer
                 self.logger.info("Running Tesseract installer...")
-                result = subprocess.run(
+                subprocess.run(
                     [str(installer_path), "/SILENT", "/NORESTART",
                      f"/DIR={install_dir}"],
                     check=True

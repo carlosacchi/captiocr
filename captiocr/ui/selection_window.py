@@ -3,7 +3,6 @@ Selection window for choosing capture area.
 """
 import tkinter as tk
 from typing import Optional, Callable, Tuple
-import logging
 
 from .base_window import BaseWindow
 from ..config.constants import SELECTION_WINDOW_ALPHA, SELECTION_WINDOW_COLOR, MIN_CAPTURE_AREA_SIZE
@@ -50,9 +49,9 @@ class SelectionWindow(BaseWindow):
         
         self.logger.info(f"Selection window will cover: {self.virtual_bounds}")
         if self.monitor_manager:
-            self.logger.info(f"Per-monitor DPI scaling will be used")
+            self.logger.info("Per-monitor DPI scaling will be used")
         else:
-            self.logger.info(f"Fallback DPI scale factor: 1.0")
+            self.logger.info("Fallback DPI scale factor: 1.0")
     
     def show(self) -> None:
         """Show the selection window."""
@@ -276,7 +275,7 @@ Press Enter to confirm selection."""
             self.logger.info(f"Using scale factor {scale_factor} from settings based on center coordinates ({center_x}, {center_y})")
         else:
             scale_factor = 1.0
-            self.logger.info(f"No monitor manager or settings available, using default scale factor 1.0")
+            self.logger.info("No monitor manager or settings available, using default scale factor 1.0")
         
         # With DPI awareness enabled, coordinates are already in physical pixels
         # We don't need to apply scale factor for ImageGrab
@@ -288,7 +287,7 @@ Press Enter to confirm selection."""
         
         # Validate minimum size
         if physical_width < MIN_CAPTURE_AREA_SIZE or physical_height < MIN_CAPTURE_AREA_SIZE:
-            err = self.canvas.create_text(
+            self.canvas.create_text(
                 self.screen_width // 2,
                 self.screen_height // 2,
                 text=f"Selected area too small!\nMinimum {MIN_CAPTURE_AREA_SIZE}×{MIN_CAPTURE_AREA_SIZE} pixels\nYour selection: {physical_width}×{physical_height} pixels",
@@ -342,5 +341,5 @@ Press Enter to confirm selection."""
                 if self.window:
                     self.window.destroy()
                     self.window = None
-            except:
+            except Exception:
                 pass

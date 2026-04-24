@@ -152,7 +152,7 @@ class MonitorManager:
                     # Log warning if DPI detection may have failed
                     if monitor.dpi == 96:
                         if i == 0:  # Primary monitor
-                            self.logger.warning(f"Primary monitor showing 96 DPI - this may indicate DPI detection issues")
+                            self.logger.warning("Primary monitor showing 96 DPI - this may indicate DPI detection issues")
                         else:  # Secondary monitors
                             self.logger.warning(f"Monitor {i+1} DPI detection may have failed (showing 96 DPI)")
                 
@@ -446,7 +446,7 @@ class MonitorManager:
                 scale_factor = ctypes.windll.shcore.GetScaleFactorForDevice(0) / 100
                 if scale_factor > 0:
                     return scale_factor
-            except:
+            except Exception:
                 pass
             
             # Method 2: Use tkinter (often more reliable)
@@ -458,10 +458,10 @@ class MonitorManager:
                 root.destroy()
                 if scale_factor > 0:
                     return scale_factor
-            except:
+            except Exception:
                 pass
                 
             return 1.0
-        except:
+        except Exception:
             return 1.0
     

@@ -167,6 +167,8 @@ CaptiOCR_old.py
 claude.md
 AlwaysOnTopIssue.txt
 analysis_raw_capture_pipeline.md
+.codex
+security_todo*
 
 # Explicitly include
 !requirements.txt

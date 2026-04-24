@@ -37,13 +37,17 @@ DEFAULT_RECENT_TEXTS_WINDOW_SIZE = 5  # Number of previous captures to compare
 DEFAULT_DELTA_BUFFER_THRESHOLD = 3  # Fragments to accumulate before flushing
 DEFAULT_INCREMENTAL_THRESHOLD = 0.7  # Percentage overlap for incremental detection (70%)
 
-# Post-Processing Configuration (recall-first pipeline for processed files)
-POST_PROCESS_DEDUP_ENTER_THRESHOLD = 0.82  # Enter dedup mode when similarity >= this
-POST_PROCESS_DEDUP_EXIT_THRESHOLD = 0.55  # Exit dedup mode when similarity <= this
-POST_PROCESS_MIN_LENGTH_RATIO = 0.60  # No-downgrade rule: skip if new < this * previous length
-POST_PROCESS_MIN_NEW_WORDS = 3  # No-downgrade rule: minimum new words to accept a shorter frame
-POST_PROCESS_FRAME_CONSENSUS_WINDOW = 3  # Emit only when content appears in N-1 of N frames
-POST_PROCESS_MIN_SENTENCE_WORDS = 2  # Minimum words for a sentence to be considered meaningful
+# Post-Processing Configuration (ROVER + TF-IDF scoring pipeline)
+POST_PROCESS_EMIT_SCORE_THRESHOLD = 2.0   # Min aggregate novelty score to emit a frame
+POST_PROCESS_FREQ_WINDOW_SIZE = 30        # Sliding window size (frames) for IDF frequency tracking
+POST_PROCESS_FRAME_CONSENSUS_WINDOW = 3   # Frame voting window: ROVER checks this many recent frames
+POST_PROCESS_MIN_SENTENCE_WORDS = 2       # Minimum words for a sentence to be considered meaningful
+
+# Legacy post-processing constants — kept for backward compatibility with saved configs
+POST_PROCESS_DEDUP_ENTER_THRESHOLD = 0.82
+POST_PROCESS_DEDUP_EXIT_THRESHOLD = 0.55
+POST_PROCESS_MIN_LENGTH_RATIO = 0.60
+POST_PROCESS_MIN_NEW_WORDS = 3
 
 # UI Configuration
 CAPTURE_WINDOW_ALPHA = 0.1  # Semi-transparent - control frame visible, capture area distinguishable
@@ -71,13 +75,66 @@ def get_app_path() -> Path:
     else:
         return Path(__file__).parent.parent.parent
 
+
+def get_user_data_path() -> Path:
+    """
+    Get the writable user data root for CaptiOCR.
+
+    Resolution order:
+      1. ``CAPTIOCR_USER_DATA`` environment variable (power-user override).
+      2. ``%LOCALAPPDATA%\\CaptiOCR`` on Windows.
+      3. ``%APPDATA%\\CaptiOCR`` as Windows fallback.
+      4. ``~/.captiocr`` on other platforms.
+
+    Storing writable data outside the install directory avoids requiring
+    write access to ``Program Files`` and keeps user content isolated from
+    the application binaries.
+    """
+    override = os.environ.get("CAPTIOCR_USER_DATA")
+    if override:
+        return Path(override)
+
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "CaptiOCR"
+
+    app_data = os.environ.get("APPDATA")
+    if app_data:
+        return Path(app_data) / "CaptiOCR"
+
+    return Path.home() / ".captiocr"
+
+
 # Directory Structure
 APP_PATH = get_app_path()
-CAPTURES_DIR = APP_PATH / "captures"
-CONFIG_DIR = APP_PATH / "config"
-LOGS_DIR = APP_PATH / "logs"
+USER_DATA_PATH = get_user_data_path()
+
+
+def _resolve_writable_dir(name: str) -> Path:
+    """
+    Resolve a writable subdirectory, preferring an existing legacy location
+    next to the application (for backward compatibility with installs that
+    pre-date the per-user data layout). New installs use ``USER_DATA_PATH``.
+    """
+    legacy = APP_PATH / name
+    try:
+        if legacy.exists() and any(legacy.iterdir()):
+            return legacy
+    except OSError:
+        pass
+    return USER_DATA_PATH / name
+
+
+# Writable directories live under the per-user data path so we never need
+# write access to the install directory (e.g. Program Files). Existing
+# legacy directories next to the app are honored to avoid breaking upgrades.
+CAPTURES_DIR = _resolve_writable_dir("captures")
+CONFIG_DIR = _resolve_writable_dir("config")
+LOGS_DIR = _resolve_writable_dir("logs")
+TESSDATA_DIR = _resolve_writable_dir("tessdata")
+
+# Read-only resources stay alongside the application binaries.
 RESOURCES_DIR = APP_PATH / "resources"
-TESSDATA_DIR = APP_PATH / "tessdata"
 
 # Logging Configuration
 LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
@@ -100,6 +157,19 @@ MONITOR_DISCONNECTION_CHECK_INTERVAL = 5.0  # seconds
 
 # Language Download Configuration
 TESSDATA_DOWNLOAD_URL = "https://github.com/tesseract-ocr/tessdata/raw/main/{}.traineddata"
+
+# Tesseract installer download (Windows). Pinned to an official upstream
+# release URL on github.com so that an attacker cannot point us at a
+# different installer without modifying source code.
+TESSERACT_INSTALLER_URL = (
+    "https://github.com/tesseract-ocr/tesseract/releases/download/"
+    "5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+)
+TESSERACT_INSTALLER_TRUSTED_HOSTS = (
+    "github.com",
+    "objects.githubusercontent.com",
+)
+TESSERACT_INSTALLER_MIN_SIZE_BYTES = 5_000_000
 
 # Update Check Configuration
 GITHUB_RELEASES_API = "https://api.github.com/repos/CarloSacchi/CaptiOCR/releases/latest"

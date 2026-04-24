@@ -1,5 +1,5 @@
-0.16.3
-16/03/2026
+0.17.4
+24/04/2026
 CaptiOCR
 Author: Carlo Sacchi
 Website: https://www.captiocr.com

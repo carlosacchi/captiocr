@@ -237,6 +237,7 @@ class MainWindow:
         help_menu.add_separator()
         help_menu.add_command(label="About", command=self._show_about)
         help_menu.add_command(label="Instructions", command=self._show_instructions)
+        help_menu.add_command(label="Privacy & Security", command=self._show_privacy_security)
     
     def _create_widgets(self) -> None:
         """Create main window widgets."""
@@ -798,9 +799,35 @@ and subtitles from video conferencing applications.
 Developed by: {app_info.author}
 Website: {app_info.url}
 
+Note: CaptiOCR registers a global Ctrl+Q hotkey to stop
+capture. See Help → Privacy & Security for details.
+
 © {datetime.now().year} - OCR caption capture solution"""
-        
+
         messagebox.showinfo(f"About {app_info.app_name}", about_text)
+
+    def _show_privacy_security(self) -> None:
+        """Show a Privacy & Security disclosure dialog."""
+        disclosure = (
+            "Privacy & Security disclosure\n\n"
+            "Global hotkey:\n"
+            "  CaptiOCR registers a system-wide Ctrl+Q hotkey via the\n"
+            "  'keyboard' Python module so capture can be stopped even\n"
+            "  when the CaptiOCR window is not focused. The application\n"
+            "  does NOT log, store, or transmit any keystrokes; only the\n"
+            "  Ctrl+Q event is observed.\n\n"
+            "Screen capture:\n"
+            "  Only the rectangular region you select is captured. OCR\n"
+            "  runs locally via Tesseract \u2014 no images or text are sent\n"
+            "  to any remote service.\n\n"
+            "Local data:\n"
+            "  Captures, logs, settings and downloaded language files\n"
+            "  are stored under your local user data folder\n"
+            "  (%LOCALAPPDATA%\\CaptiOCR on Windows). You can delete\n"
+            "  them at any time.\n\n"
+            "More details: see SECURITY.md and PRIVACY.md in the repository."
+        )
+        messagebox.showinfo("Privacy & Security", disclosure)
     
     def _show_instructions(self) -> None:
         """Show instructions dialog with formatted content."""

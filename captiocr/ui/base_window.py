@@ -2,7 +2,6 @@
 Base window class for UI windows.
 """
 import tkinter as tk
-from tkinter import ttk
 from typing import Optional, Tuple
 import logging
 import gc

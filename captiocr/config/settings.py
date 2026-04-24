@@ -4,11 +4,11 @@ Application settings and preferences management.
 import json
 import os
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 from datetime import datetime
 import logging
 
-from ..config.constants import CONFIG_DIR, TESSDATA_PREFIX
+from ..config.constants import CONFIG_DIR
 from ..models.capture_config import CaptureConfig
 
 

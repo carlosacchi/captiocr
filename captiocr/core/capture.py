@@ -112,7 +112,7 @@ class ScreenCapture:
             f.write(f"Similarity threshold: {self.text_processor.similarity_threshold}\n")
             f.write(f"Min capture interval: {self.capture_config.min_capture_interval:.1f}s\n")
             f.write(f"Max capture interval: {self.capture_config.max_capture_interval:.1f}s\n")
-            f.write(f"Clean text mode: raw\n\n")
+            f.write("Clean text mode: raw\n\n")
         
         # Start capture thread
         self.capture_thread = threading.Thread(
@@ -436,15 +436,13 @@ class ScreenCapture:
                     text = ''.join(block).replace(timestamp, '').strip()
                     text_blocks.append((timestamp, text))
 
-            # Recall-first post-processing pipeline
+            # ROVER + TF-IDF post-processing pipeline
             unique_blocks = self.text_processor.filter_duplicate_blocks_aggressive(
                 text_blocks,
-                dedup_enter=self.capture_config.post_process_dedup_enter,
-                dedup_exit=self.capture_config.post_process_dedup_exit,
-                min_length_ratio=self.capture_config.post_process_min_length_ratio,
-                min_new_words=self.capture_config.post_process_min_new_words,
+                emit_score_threshold=self.capture_config.post_process_emit_score_threshold,
+                freq_window_size=self.capture_config.post_process_freq_window_size,
                 frame_window=self.capture_config.post_process_frame_window,
-                min_sentence_words=self.capture_config.post_process_min_sentence_words
+                min_sentence_words=self.capture_config.post_process_min_sentence_words,
             )
 
             # Create processed filename
@@ -457,7 +455,7 @@ class ScreenCapture:
             # Write processed content with metadata header
             with open(processed_filepath, 'w', encoding='utf-8') as f:
                 # Write metadata header
-                f.write(f"CaptiOCR Processed Transcription\n")
+                f.write("CaptiOCR Processed Transcription\n")
                 f.write(f"Version: {APP_VERSION}\n")
                 if metadata.get('capture_started'):
                     f.write(f"Capture started: {metadata['capture_started']}\n")
@@ -470,15 +468,13 @@ class ScreenCapture:
                 # Write processing diagnostics if available
                 stats = getattr(self.text_processor, '_last_post_process_stats', None)
                 if stats:
-                    f.write(f"\n--- Processing Diagnostics ---\n")
+                    f.write("\n--- Processing Diagnostics ---\n")
                     f.write(f"Total frames: {stats['total_frames']}\n")
                     f.write(f"Chunks emitted: {stats['chunks_emitted']}\n")
                     f.write(f"Dropped (UI artifact): {stats['dropped_ui_artifact']}\n")
                     f.write(f"Dropped (OCR artifact): {stats['dropped_ocr_artifact']}\n")
-                    f.write(f"Dropped (no consensus): {stats['dropped_no_consensus']}\n")
-                    f.write(f"Dropped (no-downgrade): {stats['dropped_no_downgrade']}\n")
-                    f.write(f"Dropped (hysteresis dedup): {stats['dropped_hysteresis_dedup']}\n")
-                    f.write(f"Dropped (empty after overlap): {stats['dropped_empty_novel']}\n")
+                    f.write(f"Dropped (no novel words): {stats['dropped_empty_novel']}\n")
+                    f.write(f"Dropped (low novelty score): {stats['dropped_low_score']}\n")
                     f.write(f"Merges performed: {stats['merges_performed']}\n")
                     f.write(f"Speaker names repaired: {stats.get('speaker_names_repaired', 0)}\n")
                     f.write(f"Possible drops detected: {stats['possible_drops_detected']}\n")

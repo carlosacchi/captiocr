@@ -4,7 +4,6 @@ Logging configuration and utilities.
 import logging
 import sys
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
 from ..config.constants import LOGS_DIR, LOG_FORMAT, LOG_DATE_FORMAT
@@ -65,7 +64,7 @@ class LoggerSetup:
         Returns:
             Logger instance
         """
-        instance = cls()
+        cls()
         return logging.getLogger(name)
     
     @classmethod

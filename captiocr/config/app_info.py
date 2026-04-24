@@ -5,7 +5,7 @@ All app metadata is loaded from external configuration files.
 import os
 import json
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
 
 class AppInfo:
@@ -52,7 +52,7 @@ class AppInfo:
             with open(path, 'r', encoding='utf-8') as f:
                 self._info = json.load(f)
             # Successfully loaded app info from JSON
-        except Exception as e:
+        except Exception:
             # Failed to load JSON config, using defaults
             self._set_defaults()
     
@@ -89,7 +89,7 @@ class AppInfo:
 
 
             # Successfully loaded app info from TXT
-        except Exception as e:
+        except Exception:
             # Failed to load TXT config, using defaults
             self._set_defaults()
     

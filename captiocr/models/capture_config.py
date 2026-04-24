@@ -13,12 +13,14 @@ from ..config.constants import (
     DEFAULT_RECENT_TEXTS_WINDOW_SIZE,
     DEFAULT_DELTA_BUFFER_THRESHOLD,
     DEFAULT_INCREMENTAL_THRESHOLD,
+    POST_PROCESS_EMIT_SCORE_THRESHOLD,
+    POST_PROCESS_FREQ_WINDOW_SIZE,
+    POST_PROCESS_FRAME_CONSENSUS_WINDOW,
+    POST_PROCESS_MIN_SENTENCE_WORDS,
     POST_PROCESS_DEDUP_ENTER_THRESHOLD,
     POST_PROCESS_DEDUP_EXIT_THRESHOLD,
     POST_PROCESS_MIN_LENGTH_RATIO,
     POST_PROCESS_MIN_NEW_WORDS,
-    POST_PROCESS_FRAME_CONSENSUS_WINDOW,
-    POST_PROCESS_MIN_SENTENCE_WORDS
 )
 
 
@@ -37,13 +39,16 @@ class CaptureConfig:
     delta_buffer_threshold: int = DEFAULT_DELTA_BUFFER_THRESHOLD
     incremental_threshold: float = DEFAULT_INCREMENTAL_THRESHOLD
 
-    # Post-processing pipeline parameters
+    # Post-processing pipeline parameters (ROVER + TF-IDF scoring)
+    post_process_emit_score_threshold: float = POST_PROCESS_EMIT_SCORE_THRESHOLD
+    post_process_freq_window_size: int = POST_PROCESS_FREQ_WINDOW_SIZE
+    post_process_frame_window: int = POST_PROCESS_FRAME_CONSENSUS_WINDOW
+    post_process_min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS
+    # Legacy fields — loaded from old configs but not used by the new algorithm
     post_process_dedup_enter: float = POST_PROCESS_DEDUP_ENTER_THRESHOLD
     post_process_dedup_exit: float = POST_PROCESS_DEDUP_EXIT_THRESHOLD
     post_process_min_length_ratio: float = POST_PROCESS_MIN_LENGTH_RATIO
     post_process_min_new_words: int = POST_PROCESS_MIN_NEW_WORDS
-    post_process_frame_window: int = POST_PROCESS_FRAME_CONSENSUS_WINDOW
-    post_process_min_sentence_words: int = POST_PROCESS_MIN_SENTENCE_WORDS
 
     # Callbacks
     on_interval_change: Optional[Callable[[float], None]] = field(default=None, repr=False)
@@ -204,10 +209,8 @@ class CaptureConfig:
             'recent_texts_window_size': self.recent_texts_window_size,
             'delta_buffer_threshold': self.delta_buffer_threshold,
             'incremental_threshold': self.incremental_threshold,
-            'post_process_dedup_enter': self.post_process_dedup_enter,
-            'post_process_dedup_exit': self.post_process_dedup_exit,
-            'post_process_min_length_ratio': self.post_process_min_length_ratio,
-            'post_process_min_new_words': self.post_process_min_new_words,
+            'post_process_emit_score_threshold': self.post_process_emit_score_threshold,
+            'post_process_freq_window_size': self.post_process_freq_window_size,
             'post_process_frame_window': self.post_process_frame_window,
             'post_process_min_sentence_words': self.post_process_min_sentence_words
         }
@@ -262,43 +265,21 @@ class CaptureConfig:
                 self.incremental_threshold = DEFAULT_INCREMENTAL_THRESHOLD
 
         # Load and validate post-processing pipeline parameters
-        if 'post_process_dedup_enter' in config_dict:
-            value = config_dict['post_process_dedup_enter']
-            if isinstance(value, (int, float)) and 0.50 <= value <= 0.95:
-                self.post_process_dedup_enter = float(value)
+        if 'post_process_emit_score_threshold' in config_dict:
+            value = config_dict['post_process_emit_score_threshold']
+            if isinstance(value, (int, float)) and 0.5 <= value <= 10.0:
+                self.post_process_emit_score_threshold = float(value)
             else:
-                self._logger.warning(f"Invalid post_process_dedup_enter: {value}, using default")
-                self.post_process_dedup_enter = POST_PROCESS_DEDUP_ENTER_THRESHOLD
+                self._logger.warning(f"Invalid post_process_emit_score_threshold: {value}, using default")
+                self.post_process_emit_score_threshold = POST_PROCESS_EMIT_SCORE_THRESHOLD
 
-        if 'post_process_dedup_exit' in config_dict:
-            value = config_dict['post_process_dedup_exit']
-            if isinstance(value, (int, float)) and 0.30 <= value <= 0.80:
-                self.post_process_dedup_exit = float(value)
+        if 'post_process_freq_window_size' in config_dict:
+            value = config_dict['post_process_freq_window_size']
+            if isinstance(value, int) and 5 <= value <= 100:
+                self.post_process_freq_window_size = value
             else:
-                self._logger.warning(f"Invalid post_process_dedup_exit: {value}, using default")
-                self.post_process_dedup_exit = POST_PROCESS_DEDUP_EXIT_THRESHOLD
-
-        # Enforce hysteresis gap: exit must be lower than enter
-        if self.post_process_dedup_exit >= self.post_process_dedup_enter:
-            self._logger.warning("dedup_exit >= dedup_enter, resetting to defaults")
-            self.post_process_dedup_enter = POST_PROCESS_DEDUP_ENTER_THRESHOLD
-            self.post_process_dedup_exit = POST_PROCESS_DEDUP_EXIT_THRESHOLD
-
-        if 'post_process_min_length_ratio' in config_dict:
-            value = config_dict['post_process_min_length_ratio']
-            if isinstance(value, (int, float)) and 0.30 <= value <= 0.90:
-                self.post_process_min_length_ratio = float(value)
-            else:
-                self._logger.warning(f"Invalid post_process_min_length_ratio: {value}, using default")
-                self.post_process_min_length_ratio = POST_PROCESS_MIN_LENGTH_RATIO
-
-        if 'post_process_min_new_words' in config_dict:
-            value = config_dict['post_process_min_new_words']
-            if isinstance(value, int) and 1 <= value <= 10:
-                self.post_process_min_new_words = value
-            else:
-                self._logger.warning(f"Invalid post_process_min_new_words: {value}, using default")
-                self.post_process_min_new_words = POST_PROCESS_MIN_NEW_WORDS
+                self._logger.warning(f"Invalid post_process_freq_window_size: {value}, using default")
+                self.post_process_freq_window_size = POST_PROCESS_FREQ_WINDOW_SIZE
 
         if 'post_process_frame_window' in config_dict:
             value = config_dict['post_process_frame_window']

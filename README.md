@@ -5,6 +5,12 @@
 
 **CaptiOCR** is an open-source **real-time screen text extraction tool** designed to capture and transcribe captions (subtitles) from video conferencing applications like **Microsoft Teams**, **Zoom**, and **Google Meet**. With an intuitive interface and powerful OCR capabilities, you can select any screen area and extract text continuously in real-time.
 
+> 🔒 **Security & privacy**: CaptiOCR runs entirely on your machine and does
+> not transmit captures to any server. It registers a global `Ctrl+Q` hotkey
+> to stop capture (no other keystrokes are observed). See [SECURITY.md](SECURITY.md)
+> and [PRIVACY.md](PRIVACY.md) for the full disclosure and how to verify
+> released artifacts (SHA256 + GitHub build provenance).
+
 ---
 
 ## ✨ Key Features
