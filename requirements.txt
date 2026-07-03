@@ -1,0 +1,16 @@
+# tkinter
+# pytesseract
+# Pillow
+# keyboard
+# difflib
+
+pytesseract==0.3.10
+Pillow>=10.3.0
+# keyboard provides the global Ctrl+Q hotkey; on macOS it requires root,
+# so it is Windows-only and the app falls back to an in-app Tk binding.
+keyboard==0.13.5; sys_platform == "win32"
+# pyobjc (Cocoa) lets the macOS app register a normal activation policy so
+# the first click on its windows is delivered to widgets instead of being
+# consumed to activate the process. Optional — the app degrades gracefully.
+pyobjc-framework-Cocoa>=10.0; sys_platform == "darwin"
+pyinstaller==6.12.0
