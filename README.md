@@ -70,6 +70,16 @@ Before installation, ensure you have:
 
 ---
 
+## 🍎 macOS Support
+
+A native **macOS build** (Apple Silicon `.dmg`, `arm64`) is available, built and signed by a dedicated CI pipeline. It is developed on its own branch line, kept intentionally separate from the main Windows codebase for now, and released independently:
+
+- **Download:** grab the latest `CaptiOCR-macos-vX.Y.Z-macos-arm64.dmg` from the [Releases page](https://github.com/CarloSacchi/CaptiOCR/releases) — macOS builds use the `macos-vX.Y.Z` tag prefix and are listed alongside the regular Windows releases.
+- **Verification:** each macOS release ships its own `SHA256SUMS.txt`, the same way Windows releases do.
+- **Status:** the macOS port has its own development line and release cadence, independent from the Windows `v*` releases; feature parity may lag behind Windows until the branch is merged.
+
+---
+
 ## 📦 Installation
 
 ### **1️⃣ Clone the Repository**
@@ -254,7 +264,7 @@ Full threat model and reporting process: [SECURITY.md](SECURITY.md).
 
 ## 📋 System Requirements
 
-- **OS**: Windows 10/11 (primary), Linux/macOS (experimental)
+- **OS**: Windows 10/11 (primary); macOS (Apple Silicon, separate release line — see [macOS Support](#-macos-support)); Linux (experimental)
 - **RAM**: 4GB minimum, 8GB recommended
 - **CPU**: Multi-core processor recommended for real-time processing
 - **Display**: Support for multiple monitors with varying DPI

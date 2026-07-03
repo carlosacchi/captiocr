@@ -2,7 +2,7 @@
 Main application window.
 """
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, filedialog
 import re
 import threading
 import webbrowser
@@ -62,8 +62,163 @@ class MainWindow:
         except Exception as e:
             self.logger.error(f"Could not register global hotkey: {e}")
 
+        # Schedule Tesseract check on startup (before update check)
+        self.root.after(500, self._check_tesseract_on_startup)
+
         # Schedule automatic update check after UI has rendered
         self.root.after(3000, self._check_for_updates_startup)
+
+    def _check_tesseract_on_startup(self) -> None:
+        """Check Tesseract availability at startup and offer options if missing."""
+        if self.ocr_processor.is_tesseract_available():
+            return
+
+        self._show_tesseract_options_dialog()
+
+    def _show_tesseract_options_dialog(self) -> None:
+        """Show a dialog with three options when Tesseract is not found."""
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Tesseract OCR Not Found")
+        dialog.resizable(False, False)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(
+            frame,
+            text="Tesseract OCR was not found on this machine.\n\n"
+                 "CaptiOCR requires Tesseract to perform text recognition.\n\n"
+                 "Choose an option:",
+            justify=tk.LEFT,
+            wraplength=360
+        ).pack(anchor=tk.W, pady=(0, 12))
+
+        def on_auto_install():
+            dialog.destroy()
+            self.status_var.set("Installing Tesseract OCR...")
+            self.start_button.config(state=tk.DISABLED)
+
+            def _install():
+                success = self.ocr_processor.install_tesseract()
+                self.root.after(0, lambda: self._on_tesseract_install_done(success))
+
+            threading.Thread(target=_install, daemon=True).start()
+
+        def on_browse():
+            dialog.destroy()
+            self._browse_for_tesseract()
+
+        def on_skip():
+            dialog.destroy()
+            self._show_tesseract_manual_url_dialog(
+                title="Tesseract OCR Required",
+                message="Tesseract OCR is required to use CaptiOCR.\n"
+                        "Please install it manually:"
+            )
+
+        btn_frame = ttk.Frame(frame)
+        btn_frame.pack(fill=tk.X, pady=(0, 4))
+
+        ttk.Button(
+            btn_frame,
+            text="Install automatically (winget)",
+            command=on_auto_install,
+            width=32
+        ).pack(fill=tk.X, pady=2)
+
+        ttk.Button(
+            btn_frame,
+            text="Browse for tesseract.exe...",
+            command=on_browse,
+            width=32
+        ).pack(fill=tk.X, pady=2)
+
+        ttk.Button(
+            btn_frame,
+            text="Skip (show manual instructions)",
+            command=on_skip,
+            width=32
+        ).pack(fill=tk.X, pady=2)
+
+        dialog.transient(self.root)
+        self.root.wait_window(dialog)
+
+    def _browse_for_tesseract(self) -> None:
+        """Let the user manually locate tesseract.exe and initialize from it."""
+        path = filedialog.askopenfilename(
+            title="Locate tesseract.exe",
+            filetypes=[("Tesseract", "tesseract.exe"), ("Executables", "*.exe")]
+        )
+        if not path:
+            self._show_tesseract_manual_url_dialog(
+                title="Tesseract OCR Required",
+                message="Tesseract OCR is required to use CaptiOCR.\n"
+                        "Please install it manually:"
+            )
+            return
+
+        success = self.ocr_processor.initialize_tesseract_with_hint(path)
+        if success:
+            self.status_var.set("Ready")
+            messagebox.showinfo(
+                "Tesseract OCR Ready",
+                f"Tesseract OCR was found and configured successfully.\n\n"
+                f"Path: {path}"
+            )
+        else:
+            messagebox.showerror(
+                "Invalid Tesseract",
+                f"The selected file does not appear to be a working tesseract.exe.\n\n"
+                f"Path: {path}\n\n"
+                "Please try again or install Tesseract from the UB Mannheim website."
+            )
+            self._show_tesseract_manual_url_dialog(
+                title="Tesseract OCR Required",
+                message="Please install Tesseract OCR manually:"
+            )
+
+    def _on_tesseract_install_done(self, success: bool) -> None:
+        """Handle result of automatic Tesseract installation."""
+        self.start_button.config(state=tk.NORMAL)
+        if success:
+            self.status_var.set("Ready")
+            messagebox.showinfo(
+                "Tesseract OCR Installed",
+                "Tesseract OCR was installed successfully. CaptiOCR is ready to use."
+            )
+        else:
+            self.status_var.set("Tesseract not available")
+            self._show_tesseract_manual_url_dialog(
+                title="Installation Failed",
+                message="Tesseract OCR could not be installed automatically.\n\n"
+                        "Please install it manually:"
+            )
+
+    def _show_tesseract_manual_url_dialog(self, title: str, message: str) -> None:
+        """Show a dialog with a clickable Tesseract download URL."""
+        url = "https://github.com/UB-Mannheim/tesseract/wiki"
+        dialog = tk.Toplevel(self.root)
+        dialog.title(title)
+        dialog.resizable(False, False)
+        dialog.grab_set()
+
+        frame = ttk.Frame(dialog, padding=20)
+        frame.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(frame, text=message, justify=tk.LEFT, wraplength=340).pack(anchor=tk.W)
+
+        link = tk.Label(
+            frame, text=url,
+            fg="#0066CC", cursor="hand2",
+            font=("Arial", 9, "underline")
+        )
+        link.pack(anchor=tk.W, pady=(4, 12))
+        link.bind("<Button-1>", lambda _e: webbrowser.open(url))
+
+        ttk.Button(frame, text="OK", command=dialog.destroy).pack()
+        dialog.transient(self.root)
+        self.root.wait_window(dialog)
 
     def _check_for_updates_startup(self) -> None:
         """Run update check in background thread on startup (silent on failure)."""

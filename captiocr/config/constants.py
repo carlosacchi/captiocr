@@ -161,6 +161,7 @@ TESSDATA_DOWNLOAD_URL = "https://github.com/tesseract-ocr/tessdata/raw/main/{}.t
 # Tesseract installer download (Windows). Pinned to an official upstream
 # release URL on github.com so that an attacker cannot point us at a
 # different installer without modifying source code.
+TESSERACT_PATH_CACHE = CONFIG_DIR / 'tesseract_path.txt'
 TESSERACT_INSTALLER_URL = (
     "https://github.com/tesseract-ocr/tesseract/releases/download/"
     "5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
@@ -168,6 +169,7 @@ TESSERACT_INSTALLER_URL = (
 TESSERACT_INSTALLER_TRUSTED_HOSTS = (
     "github.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
 )
 TESSERACT_INSTALLER_MIN_SIZE_BYTES = 5_000_000
 

@@ -3,6 +3,7 @@ OCR processing module using Tesseract.
 """
 import os
 import sys
+import shutil
 import urllib.parse
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,7 @@ from ..config.constants import (
     OCR_CONFIG_CAPTION_MODE, OCR_CONFIG_GENERAL,
     TESSERACT_INSTALLER_URL, TESSERACT_INSTALLER_TRUSTED_HOSTS,
     TESSERACT_INSTALLER_MIN_SIZE_BYTES,
+    TESSERACT_PATH_CACHE,
 )
 
 
@@ -46,39 +48,120 @@ class OCRProcessor:
         """Initialize OCR processor."""
         self.logger = logging.getLogger('CaptiOCR.OCRProcessor')
         self.tesseract_initialized = False
+        self.resolved_cmd: Optional[str] = None
         self.initialize_tesseract()
     
+    def _resolve_tesseract_cmd(self) -> Optional[str]:
+        """
+        Resolve the Tesseract executable path by searching multiple locations.
+
+        Search order:
+        0. Cached path saved from a previous successful detection.
+        1. Default path from constants (fastest when installed normally).
+        2. System PATH via shutil.which.
+        3. Windows registry HKLM/HKCU SOFTWARE\\Tesseract-OCR InstallDir.
+        4. Glob search under %LOCALAPPDATA%\\Programs\\ (any subfolder name).
+
+        Returns:
+            Absolute path string to tesseract.exe, or None if not found.
+        """
+        # 0. Cached path from a previous successful detection
+        try:
+            if TESSERACT_PATH_CACHE.exists():
+                cached = TESSERACT_PATH_CACHE.read_text(encoding='utf-8').strip()
+                if cached and os.path.exists(cached):
+                    self.logger.debug(f"Tesseract found via cache: {cached}")
+                    return cached
+        except Exception as e:
+            self.logger.debug(f"Cache read failed: {e}")
+
+        # 1. Default constant path
+        if os.path.exists(TESSERACT_CMD):
+            self.logger.debug(f"Tesseract found at default path: {TESSERACT_CMD}")
+            return TESSERACT_CMD
+
+        # 2. System PATH
+        found_in_path = shutil.which('tesseract')
+        if found_in_path:
+            self.logger.info(f"Tesseract found in PATH: {found_in_path}")
+            return found_in_path
+
+        # 3. Windows registry
+        if sys.platform == 'win32':
+            try:
+                import winreg
+                for root_key in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+                    for reg_path in (
+                        r'SOFTWARE\Tesseract-OCR',
+                        r'SOFTWARE\WOW6432Node\Tesseract-OCR',
+                    ):
+                        try:
+                            with winreg.OpenKey(root_key, reg_path) as key:
+                                install_dir, _ = winreg.QueryValueEx(key, 'InstallDir')
+                                candidate = str(Path(install_dir) / 'tesseract.exe')
+                                if os.path.exists(candidate):
+                                    self.logger.info(f"Tesseract found via registry: {candidate}")
+                                    return candidate
+                        except (FileNotFoundError, OSError):
+                            continue
+            except Exception as e:
+                self.logger.debug(f"Registry search failed: {e}")
+
+        # 4. Glob search under %LOCALAPPDATA%\Programs\ — finds any subfolder name
+        local_app_data = os.environ.get('LOCALAPPDATA', '')
+        if local_app_data:
+            try:
+                for found in sorted(Path(local_app_data).glob('Programs/**/tesseract.exe')):
+                    self.logger.info(f"Tesseract found via glob: {found}")
+                    return str(found)
+            except Exception as e:
+                self.logger.debug(f"Glob search failed: {e}")
+
+        self.logger.error("Tesseract executable not found in any known location")
+        return None
+
     def initialize_tesseract(self) -> bool:
         """
         Initialize Tesseract for OCR operations.
-        
+
         Returns:
             True if initialization successful, False otherwise
         """
         try:
-            # Check if Tesseract executable exists
-            if not os.path.exists(TESSERACT_CMD):
-                self.logger.error(f"Tesseract not found at: {TESSERACT_CMD}")
+            cmd = self._resolve_tesseract_cmd()
+            if cmd is None:
                 return False
-            
+
             # Set Tesseract executable path
-            pytesseract.pytesseract.tesseract_cmd = TESSERACT_CMD
-            
-            # Set tessdata directory - always start with system tessdata
-            # Local tessdata will be used dynamically when specific languages are found there
-            os.environ['TESSDATA_PREFIX'] = TESSDATA_PREFIX
-            self.logger.info(f"Using system tessdata: {TESSDATA_PREFIX}")
-            
+            pytesseract.pytesseract.tesseract_cmd = cmd
+            self.resolved_cmd = cmd
+
+            # Derive tessdata prefix from the resolved install directory
+            tessdata_dir = str(Path(cmd).parent / 'tessdata')
+            if os.path.isdir(tessdata_dir):
+                os.environ['TESSDATA_PREFIX'] = tessdata_dir
+                self.logger.info(f"Using tessdata: {tessdata_dir}")
+            else:
+                # Fallback to constant (e.g. when found via PATH on non-Windows)
+                os.environ['TESSDATA_PREFIX'] = TESSDATA_PREFIX
+                self.logger.info(f"Using system tessdata: {TESSDATA_PREFIX}")
+
             # Verify installation
             version = self.get_tesseract_version()
             if version:
                 self.logger.info(f"Tesseract initialized: {version}")
                 self.tesseract_initialized = True
+                # Cache the resolved path for fast lookup on next startup
+                try:
+                    TESSERACT_PATH_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                    TESSERACT_PATH_CACHE.write_text(cmd, encoding='utf-8')
+                except Exception as e:
+                    self.logger.debug(f"Could not write Tesseract path cache: {e}")
                 return True
             else:
                 self.logger.error("Failed to verify Tesseract installation")
                 return False
-                
+
         except Exception as e:
             self.logger.error(f"Error initializing Tesseract: {e}")
             return False
@@ -99,7 +182,7 @@ class OCRProcessor:
                 startupinfo.wShowWindow = 0  # SW_HIDE
             
             result = subprocess.run(
-                [TESSERACT_CMD, "--version"],
+                [self.resolved_cmd or TESSERACT_CMD, "--version"],
                 capture_output=True,
                 text=True,
                 startupinfo=startupinfo
@@ -297,29 +380,109 @@ class OCRProcessor:
             self.logger.error(f"Error optimizing image: {e}")
             return image
     
-    def install_tesseract(self) -> bool:
+    def initialize_tesseract_with_hint(self, cmd_path: str) -> bool:
         """
-        Attempt to install Tesseract (Windows only).
+        Initialize Tesseract using an explicitly provided executable path.
+        Used when the user manually browses to tesseract.exe.
+
+        Args:
+            cmd_path: Absolute path to tesseract.exe
 
         Returns:
-            True if installation successful, False otherwise
+            True if initialization succeeded, False otherwise
         """
-        if sys.platform != 'win32':
-            self.logger.error("Automatic Tesseract installation only supported on Windows")
+        if not os.path.exists(cmd_path):
+            self.logger.error(f"Provided Tesseract path does not exist: {cmd_path}")
             return False
 
+        pytesseract.pytesseract.tesseract_cmd = cmd_path
+        self.resolved_cmd = cmd_path
+
+        tessdata_dir = str(Path(cmd_path).parent / 'tessdata')
+        if os.path.isdir(tessdata_dir):
+            os.environ['TESSDATA_PREFIX'] = tessdata_dir
+        else:
+            os.environ['TESSDATA_PREFIX'] = TESSDATA_PREFIX
+
+        version = self.get_tesseract_version()
+        if version:
+            self.logger.info(f"Tesseract initialized from user-provided path: {version}")
+            self.tesseract_initialized = True
+            try:
+                TESSERACT_PATH_CACHE.parent.mkdir(parents=True, exist_ok=True)
+                TESSERACT_PATH_CACHE.write_text(cmd_path, encoding='utf-8')
+            except Exception as e:
+                self.logger.debug(f"Could not write Tesseract path cache: {e}")
+            return True
+
+        self.logger.error(f"Tesseract at {cmd_path} failed version check")
+        return False
+
+    def _try_winget_install(self) -> bool:
+        """
+        Try to install Tesseract via winget (no UAC elevation required).
+
+        Uses --scope user so the install goes into AppData, and works through
+        the Windows Update infrastructure which is typically allowed on
+        corporate networks.
+
+        Returns:
+            True if winget install succeeded, False otherwise.
+        """
+        winget_cmd = shutil.which('winget')
+        if not winget_cmd:
+            self.logger.info("winget not found in PATH, skipping")
+            return False
         try:
-            # Import required modules
+            startupinfo = None
+            if sys.platform == 'win32':
+                startupinfo = subprocess.STARTUPINFO()
+                startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                startupinfo.wShowWindow = 0  # SW_HIDE
+
+            self.logger.info("Installing Tesseract via winget --scope user ...")
+            result = subprocess.run(
+                [
+                    winget_cmd, 'install',
+                    '--id', 'UB-Mannheim.TesseractOCR',
+                    '--scope', 'user',
+                    '--silent',
+                    '--accept-package-agreements',
+                    '--accept-source-agreements',
+                ],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                startupinfo=startupinfo,
+            )
+            if result.returncode == 0:
+                self.logger.info(f"winget install succeeded: {result.stdout.strip()}")
+                return True
+            self.logger.warning(
+                f"winget install failed (rc={result.returncode}): {result.stderr.strip()}"
+            )
+            return False
+        except Exception as e:
+            self.logger.error(f"winget install error: {e}")
+            return False
+
+    def _try_installer_download(self) -> bool:
+        """
+        Download and run the official Tesseract installer from GitHub.
+
+        Installs to %LOCALAPPDATA%\\Programs\\Tesseract-OCR to avoid UAC.
+        Note: if the Inno Setup installer enforces admin rights internally,
+        this may still fail on locked-down machines.
+
+        Returns:
+            True if installation succeeded, False otherwise.
+        """
+        try:
             import tempfile
             import urllib.request
             import hashlib
             import time
-            from tkinter import messagebox
 
-            self.logger.info("Starting Tesseract installation...")
-
-            # Use the pinned, trusted upstream URL. Reject anything that
-            # has been redirected or tampered with off the trusted hosts.
             installer_url = TESSERACT_INSTALLER_URL
             if not _is_trusted_installer_url(installer_url):
                 self.logger.error(
@@ -327,43 +490,20 @@ class OCRProcessor:
                 )
                 return False
 
-            # Require explicit user consent before downloading and
-            # executing a third-party installer.
-            try:
-                consent = messagebox.askyesno(
-                    "Install Tesseract OCR",
-                    (
-                        "CaptiOCR will download and run the official Tesseract "
-                        "OCR installer from:\n\n"
-                        f"{installer_url}\n\n"
-                        "Do you want to continue?"
-                    ),
-                )
-            except Exception as e:
-                # If we cannot show a dialog (e.g. headless), fail closed.
-                self.logger.error(f"Could not prompt for installer consent: {e}")
-                return False
+            local_app_data = os.environ.get('LOCALAPPDATA', '')
+            install_dir = (
+                Path(local_app_data) / 'Programs' / 'Tesseract-OCR'
+                if local_app_data
+                else Path(TESSERACT_CMD).parent
+            )
+            self.logger.info(f"Tesseract will be installed to: {install_dir}")
 
-            if not consent:
-                self.logger.info("User declined Tesseract installation")
-                return False
-
-            min_installer_size = TESSERACT_INSTALLER_MIN_SIZE_BYTES
-
-            # Convert TESSERACT_CMD string to Path for directory operations
-            tesseract_path = Path(TESSERACT_CMD)
-            install_dir = tesseract_path.parent
-
-            # Create temp directory
             with tempfile.TemporaryDirectory(prefix="tesseract_install_") as temp_dir:
                 installer_path = Path(temp_dir) / "tesseract-installer.exe"
 
-                # Download installer with timeout
                 self.logger.info("Downloading Tesseract installer...")
                 try:
                     with urllib.request.urlopen(installer_url, timeout=300) as response:
-                        # Re-check the resolved URL after any redirects to
-                        # ensure we still landed on a trusted host.
                         final_url = response.geturl()
                         if not _is_trusted_installer_url(final_url):
                             self.logger.error(
@@ -377,41 +517,86 @@ class OCRProcessor:
                     self.logger.error(f"Download failed: {e}")
                     return False
 
-                # Basic integrity check: verify the download is not truncated/corrupt
-                if len(installer_data) < min_installer_size:
+                if len(installer_data) < TESSERACT_INSTALLER_MIN_SIZE_BYTES:
                     self.logger.error(
                         f"Downloaded file too small ({len(installer_data)} bytes). "
-                        f"Expected at least {min_installer_size} bytes. "
                         "Installation aborted — download may be corrupt."
                     )
                     return False
 
                 sha256_hash = hashlib.sha256(installer_data).hexdigest()
                 self.logger.info(
-                    f"Installer downloaded ({len(installer_data)} bytes, "
-                    f"SHA256: {sha256_hash})"
+                    f"Installer downloaded ({len(installer_data)} bytes, SHA256: {sha256_hash})"
                 )
 
-                # Run installer
                 self.logger.info("Running Tesseract installer...")
-                subprocess.run(
-                    [str(installer_path), "/SILENT", "/NORESTART",
-                     f"/DIR={install_dir}"],
-                    check=True
-                )
+                try:
+                    subprocess.run(
+                        [str(installer_path), "/SILENT", "/NORESTART",
+                         f"/DIR={install_dir}"],
+                        check=True,
+                        timeout=300,
+                    )
+                except subprocess.CalledProcessError as e:
+                    self.logger.error(f"Installer process failed (rc={e.returncode})")
+                    return False
 
-                # Wait for installation to complete
-                max_wait = 120  # seconds
-
-                for i in range(max_wait):
-                    if os.path.exists(TESSERACT_CMD):
-                        time.sleep(3)  # Wait a bit more to ensure completion
+                expected_exe = install_dir / 'tesseract.exe'
+                for _ in range(120):
+                    if os.path.exists(expected_exe) or self._resolve_tesseract_cmd() is not None:
+                        time.sleep(2)
                         self.logger.info("Tesseract installation completed")
                         return self.initialize_tesseract()
                     time.sleep(1)
 
                 self.logger.error("Tesseract installation timed out")
                 return False
+
+        except Exception as e:
+            self.logger.error(f"Installer download/run error: {e}")
+            return False
+
+    def install_tesseract(self) -> bool:
+        """
+        Attempt to install Tesseract (Windows only).
+
+        Tries winget first (no UAC, corporate-network friendly), then falls
+        back to downloading and running the official Inno Setup installer.
+
+        Returns:
+            True if installation successful, False otherwise
+        """
+        if sys.platform != 'win32':
+            self.logger.error("Automatic Tesseract installation only supported on Windows")
+            return False
+
+        try:
+            import time
+            from tkinter import messagebox
+
+            self.logger.info("Starting Tesseract installation...")
+
+            consent = messagebox.askyesno(
+                "Install Tesseract OCR",
+                (
+                    "CaptiOCR needs Tesseract OCR to work.\n\n"
+                    "It will be installed automatically for the current user "
+                    "(no administrator rights required).\n\n"
+                    "Do you want to continue?"
+                ),
+            )
+            if not consent:
+                self.logger.info("User declined Tesseract installation")
+                return False
+
+            # 1. Try winget (preferred: no UAC, corporate-friendly)
+            if self._try_winget_install():
+                time.sleep(2)
+                return self.initialize_tesseract()
+
+            # 2. Fall back to direct installer download
+            self.logger.info("winget unavailable or failed — trying direct download")
+            return self._try_installer_download()
 
         except Exception as e:
             self.logger.error(f"Error installing Tesseract: {e}")
